@@ -1,0 +1,4 @@
+# Question Generation Prompt Template
+# TODO: Write the prompt for generating follow-up questions. 
+
+Based on this extracted data, list 3-5 questions that will help you complete the tax return preparation more accurately. Only ask if something is missing or unclear.
