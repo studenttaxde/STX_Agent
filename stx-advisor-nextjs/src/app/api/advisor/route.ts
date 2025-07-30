@@ -11,6 +11,7 @@ function getOrCreateAdvisor(sessionId: string): TaxAdvisor {
     if (!apiKey) {
       throw new Error('OpenAI API key not configured');
     }
+    console.log('Creating new TaxAdvisor instance for session:', sessionId);
     advisorSessions.set(sessionId, new TaxAdvisor(apiKey));
   }
   return advisorSessions.get(sessionId)!;
@@ -18,10 +19,14 @@ function getOrCreateAdvisor(sessionId: string): TaxAdvisor {
 
 export async function POST(request: NextRequest) {
   try {
+    console.log('Advisor API called');
     const body = await request.json();
     const { action, sessionId, extractedData, message, existingData, suggestedDeductions } = body;
 
+    console.log('Request body:', { action, sessionId, hasExtractedData: !!extractedData, hasMessage: !!message });
+
     if (!sessionId) {
+      console.error('Missing sessionId in request');
       return NextResponse.json({ error: 'Session ID required' }, { status: 400 });
     }
 
@@ -29,22 +34,28 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case 'initialize':
+        console.log('Initializing advisor with extracted data:', extractedData);
         if (extractedData) {
           advisor.setExtractedData(extractedData as ExtractedData);
         }
         
         // If there's existing data, inform the advisor
         if (existingData) {
+          console.log('Adding existing data to advisor:', existingData);
           advisor.addUserMessage(`I have existing data for ${existingData.year}: Income: €${existingData.gross_income}, Tax Paid: €${existingData.income_tax_paid}, Employer: ${existingData.employer}`);
         }
         
         // If there are suggested deductions, inform the advisor
         if (suggestedDeductions && suggestedDeductions.length > 0) {
+          console.log('Adding suggested deductions to advisor:', suggestedDeductions);
           const deductionSuggestions = suggestedDeductions.map((d: any) => `${d.category}: €${d.amount}`).join(', ');
           advisor.addUserMessage(`Based on previous years, you commonly claimed: ${deductionSuggestions}`);
         }
         
+        console.log('Getting initial advisor message');
         const initialMessage = await advisor.nextAdvisorMessage();
+        console.log('Initial message received:', initialMessage);
+        
         return NextResponse.json({
           success: true,
           message: initialMessage,
@@ -54,11 +65,14 @@ export async function POST(request: NextRequest) {
         });
 
       case 'respond':
+        console.log('Processing user response:', message);
         if (message) {
           advisor.addUserMessage(message);
         }
 
+        console.log('Getting next advisor message');
         const nextMessage = await advisor.nextAdvisorMessage();
+        console.log('Next message received:', nextMessage);
         
         // Check if conversation is done based on keywords and deduction flow completion
         const doneKeywords = [
@@ -78,10 +92,14 @@ export async function POST(request: NextRequest) {
           nextMessage.toLowerCase().includes(keyword.toLowerCase())
         );
 
+        console.log('Conversation done check:', { isDone, isAnotherYearQuestion, isResetForNewYear });
+
         // Get deduction flow information
         const deductionAnswers = advisor.getDeductionAnswers();
         const taxCalculation = advisor.getTaxCalculation();
         const userData = advisor.getUserData();
+
+        console.log('Deduction flow info:', { deductionAnswers, taxCalculation, userData });
 
         return NextResponse.json({
           success: true,
@@ -99,6 +117,7 @@ export async function POST(request: NextRequest) {
         });
 
       case 'reset':
+        console.log('Resetting advisor session');
         advisor.reset();
         return NextResponse.json({
           success: true,
@@ -106,6 +125,7 @@ export async function POST(request: NextRequest) {
         });
 
       case 'get_state':
+        console.log('Getting advisor state');
         const deductionAnswersState = advisor.getDeductionAnswers();
         const taxCalculationState = advisor.getTaxCalculation();
         const userDataState = advisor.getUserData();
@@ -124,11 +144,13 @@ export async function POST(request: NextRequest) {
         });
 
       default:
+        console.error('Invalid action:', action);
         return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     }
 
   } catch (error) {
     console.error('Advisor API error:', error);
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
     return NextResponse.json(
       { error: `Advisor failed: ${error instanceof Error ? error.message : 'Unknown error'}` },
       { status: 500 }
