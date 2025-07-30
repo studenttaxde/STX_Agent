@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { config } from '@/lib/config'
 
+export const maxDuration = 30 // Extend to 30 seconds for Netlify
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
@@ -10,15 +12,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No files provided' }, { status: 400 })
     }
 
-    const uploadPromises = files.map(async (file) => {
-      const formDataToSend = new FormData()
-      formDataToSend.append('file', file)
+    // Process files sequentially to avoid overwhelming the backend
+    const results = []
+    const failedResults = []
 
-      // Increase timeout to 60 seconds for PDF processing
-      const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 60000) // 60 second timeout
-
+    for (const file of files) {
       try {
+        const formDataToSend = new FormData()
+        formDataToSend.append('file', file)
+
+        // Use a shorter timeout for each individual file
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 25000) // 25 second timeout per file
+
         const response = await fetch(`${config.backendUrl}/extract-text`, {
           method: 'POST',
           body: formDataToSend,
@@ -33,63 +39,62 @@ export async function POST(request: NextRequest) {
         if (!response.ok) {
           const errorText = await response.text()
           console.error(`Backend error for ${file.name}:`, response.status, errorText)
-          throw new Error(`Backend error: ${response.status} - ${errorText}`)
+          failedResults.push({
+            filename: file.name,
+            success: false,
+            error: `Backend error: ${response.status} - ${errorText}`
+          })
+          continue
         }
 
         const result = await response.json()
-        return {
+        results.push({
           filename: file.name,
           success: true,
           data: result
-        }
+        })
+
       } catch (error) {
-        clearTimeout(timeoutId)
-        
         if (error instanceof Error && error.name === 'AbortError') {
-          console.error(`Timeout for ${file.name} after 60 seconds`)
-          return {
+          console.error(`Timeout for ${file.name} after 25 seconds`)
+          failedResults.push({
             filename: file.name,
             success: false,
-            error: 'Request timed out after 60 seconds. Please try with a smaller file or check your internet connection.'
-          }
-        }
-        
-        console.error(`Error processing ${file.name}:`, error)
-        return {
-          filename: file.name,
-          success: false,
-          error: error instanceof Error ? error.message : 'Extraction failed'
+            error: 'Request timed out after 25 seconds. Please try with a smaller file.'
+          })
+        } else {
+          console.error(`Error processing ${file.name}:`, error)
+          failedResults.push({
+            filename: file.name,
+            success: false,
+            error: error instanceof Error ? error.message : 'Extraction failed'
+          })
         }
       }
-    })
+    }
 
-    const results = await Promise.all(uploadPromises)
-    
     // Check if any files were processed successfully
-    const successfulResults = results.filter(r => r.success)
-    const failedResults = results.filter(r => !r.success)
-    
-    if (successfulResults.length === 0) {
+    if (results.length === 0) {
       return NextResponse.json({
         error: 'All files failed to process',
         details: failedResults
       }, { status: 500 })
     }
-    
+
     // If some files failed, return partial success
     if (failedResults.length > 0) {
       return NextResponse.json({
         success: true,
-        message: `Processed ${successfulResults.length} files successfully, ${failedResults.length} failed`,
-        results: successfulResults,
+        message: `Processed ${results.length} files successfully, ${failedResults.length} failed`,
+        results: results,
         failed: failedResults
       })
     }
-    
+
     // All files processed successfully
     return NextResponse.json({
       success: true,
-      results: successfulResults
+      results: results
     })
 
   } catch (error) {

@@ -84,14 +84,31 @@ export default function TaxAdvisorApp() {
         formData.append('files', file)
       })
 
-      const response = await fetch('/api/extract-pdfs', {
-        method: 'POST',
-        body: formData
-      })
+      // Add retry logic for production timeouts
+      let response: Response | undefined
+      let retryCount = 0
+      const maxRetries = 2
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.error || 'Extraction failed')
+      while (retryCount <= maxRetries) {
+        try {
+          response = await fetch('/api/extract-pdfs', {
+            method: 'POST',
+            body: formData
+          })
+          break // Success, exit retry loop
+        } catch (error) {
+          retryCount++
+          if (retryCount > maxRetries) {
+            throw new Error('Request failed after multiple attempts. Please try again.')
+          }
+          // Wait before retrying
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount))
+        }
+      }
+
+      if (!response || !response.ok) {
+        const errorData = await response?.json().catch(() => ({}))
+        throw new Error(errorData?.error || 'Extraction failed')
       }
 
       const data = await response.json()
@@ -148,7 +165,7 @@ export default function TaxAdvisorApp() {
       })
 
       const aggregatedData = {
-        year: year || new Date().getFullYear().toString(),
+        year: parseInt(year) || new Date().getFullYear(),
         gross_income: totalGrossIncome,
         income_tax_paid: totalIncomeTaxPaid,
         solidaritaetszuschlag: totalSolidaritaetszuschlag,
@@ -158,7 +175,7 @@ export default function TaxAdvisorApp() {
       }
 
       // Check for existing data for this year
-      const yearNum = parseInt(aggregatedData.year) || new Date().getFullYear()
+      const yearNum = aggregatedData.year
       const existingFiling = await checkExistingDataForYear(yearNum)
 
       setState(prev => ({
@@ -168,7 +185,7 @@ export default function TaxAdvisorApp() {
           totalFiles: files.length,
           results: successfulResults,
           summary: {
-            year: aggregatedData.year,
+            year: aggregatedData.year.toString(),
             grossIncome: aggregatedData.gross_income,
             incomeTaxPaid: aggregatedData.income_tax_paid,
             employer: aggregatedData.employer,
@@ -213,7 +230,7 @@ export default function TaxAdvisorApp() {
         loading: false,
         messages: [...prev.messages, { 
           sender: 'assistant', 
-          text: `Error: ${error instanceof Error ? error.message : 'Upload failed'}. Please try again with smaller files or check your internet connection.` 
+          text: `Error: ${error instanceof Error ? error.message : 'Upload failed'}. Please try again with smaller files or check your internet connection. If the problem persists, try uploading files one at a time.` 
         }]
       }))
     }
