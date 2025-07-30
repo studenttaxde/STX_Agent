@@ -1,614 +1,363 @@
-'use client';
+'use client'
 
-import React, { useState, useRef, useEffect } from 'react';
-import { Upload, MessageCircle, FileText, CheckCircle, Send, Calendar, DollarSign, User, Building, BarChart3, ChevronDown } from 'lucide-react';
-import { Message, ConversationState, ExtractedData, MultiPDFExtractionResponse } from '@/types';
+import { useState, useRef, useEffect } from 'react'
+import { config } from '@/lib/config'
+import { TaxAdvisorState, UserData, MultiPDFData } from '@/types'
 
 export default function TaxAdvisorApp() {
-  const [state, setState] = useState<ConversationState>({
+  const [state, setState] = useState<TaxAdvisorState>({
     messages: [],
+    loading: false,
+    step: 'upload',
     extractedData: null,
     multiPDFData: null,
-    currentQuestion: null,
-    answers: {},
-    step: 'idle',
-    loading: false,
     filedSummaries: [],
-    uploadProgress: {}
-  });
+    deductionAnswers: {},
+    currentQuestionIndex: 0,
+    deductionFlow: null,
+    taxCalculation: null,
+    done: false
+  })
 
-  const [files, setFiles] = useState<File[]>([]);
-  const [sessionId] = useState(() => Math.random().toString(36).substring(7));
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const chatContainerRef = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll to latest message
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [state.messages]);
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
+    }
+  }, [state.messages])
 
-  const addMessage = (sender: 'user' | 'agent', text: string) => {
-    const newMessage: Message = {
-      id: Math.random().toString(36).substring(7),
-      sender,
-      text,
-      timestamp: new Date()
-    };
-    
-    setState(prev => ({
-      ...prev,
-      messages: [...prev.messages, newMessage]
-    }));
-  };
+  const handleFileUpload = async (files: FileList) => {
+    if (!files || files.length === 0) return
 
-  const handleFileUpload = async () => {
-    if (files.length === 0) return;
-
-    setState(prev => ({ ...prev, loading: true, step: 'extracting' }));
-    const fileNames = files && files.length > 0 ? files.map(f => f.name).join(', ') : '';
-    addMessage('user', `Uploaded ${files.length} file(s): ${fileNames}`);
+    setState(prev => ({ ...prev, loading: true }))
 
     try {
-      const formData = new FormData();
-      files.forEach(file => {
-        formData.append('files', file);
-      });
+      const formData = new FormData()
+      Array.from(files).forEach(file => {
+        formData.append('files', file)
+      })
 
-      const extractResponse = await fetch('/api/extract-pdfs', {
+      const response = await fetch('/api/extract-pdfs', {
         method: 'POST',
         body: formData
-      });
+      })
 
-      if (!extractResponse.ok) {
-        const errorData = await extractResponse.json();
-        throw new Error(errorData.error || 'PDF extraction failed');
+      if (!response.ok) {
+        throw new Error('Extraction failed')
       }
 
-      const extractDataJson = await extractResponse.json();
-      
-      if (extractDataJson.total_files === 1) {
-        const extractedData: ExtractedData = extractDataJson.results[0].extractedData;
-        setState(prev => ({ ...prev, extractedData }));
-        
-        // Remove the manual extracted data display - let the advisor handle it
-        // The advisor will provide a comprehensive summary including the extracted data
-        
-        const advisorResponse = await fetch('/api/advisor', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'initialize',
-            sessionId,
-            extractedData
-          })
-        });
+      const data = await response.json()
+      console.log('Data extracted:', data)
 
-        if (!advisorResponse.ok) {
-          throw new Error('Failed to initialize advisor');
-        }
-
-        const advisorData = await advisorResponse.json();
-        
-        if (advisorData.advisor_message) {
-          addMessage('agent', advisorData.advisor_message);
-          
-          // Check if this is a final message (early exit due to threshold)
-          if (advisorData.done) {
-            setState(prev => ({
-              ...prev,
-              step: 'done',
-              currentQuestion: null,
-              filedSummaries: [...prev.filedSummaries, advisorData.advisor_message]
-            }));
-          } else {
-            setState(prev => ({
-              ...prev,
-              currentQuestion: advisorData.advisor_message,
-              step: 'asking'
-            }));
+      setState(prev => ({
+        ...prev,
+        extractedData: data,
+        multiPDFData: {
+          totalFiles: files.length,
+          results: data.results || [],
+          summary: {
+            year: data.year,
+            grossIncome: data.gross_income,
+            incomeTaxPaid: data.income_tax_paid,
+            employer: data.employer,
+            fullName: data.full_name
           }
-        }
-      } else {
-        const extractData: MultiPDFExtractionResponse = extractDataJson;
-        setState(prev => ({ ...prev, multiPDFData: extractDataJson }));
-        const summary = extractData.summary;
-        const summaryMessage = `
-📊 **Processing Complete!**
+        },
+        step: 'advisor',
+        loading: false
+      }))
 
-**📁 Files Processed:** ${extractData.total_files}
-**✅ Successful:** ${extractData.successful_extractions}
-**❌ Failed:** ${extractData.failed_extractions}
-
-**💰 Financial Summary:**
-• **Total Bruttolohn:** €${isNaN(Number(summary.total_bruttolohn)) ? 'N/A' : Number(summary.total_bruttolohn).toFixed(2)}
-• **Total Lohnsteuer:** €${isNaN(Number(summary.total_lohnsteuer)) ? 'N/A' : Number(summary.total_lohnsteuer).toFixed(2)}
-• **Total Solidaritätszuschlag:** €${isNaN(Number(summary.total_solidaritaetszuschlag)) ? 'N/A' : Number(summary.total_solidaritaetszuschlag).toFixed(2)}
-
-**📅 Time Periods:**
-${summary.time_periods && summary.time_periods.length > 0 ? summary.time_periods.map(tp => `• **${tp.filename}:** ${tp.from} to ${tp.to}`).join('\n') : 'No time periods available'}`;
-        addMessage('agent', summaryMessage);
-        
-        // Continue the conversation with the advisor for multi-PDF
-        const advisorResponse = await fetch('/api/advisor', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            action: 'initialize',
-            sessionId,
-            extractedData: {
-              full_name: extractData.results[0]?.extractedData?.name || 'User',
-              gross_income: Number(summary.total_bruttolohn) || 0,
-              income_tax_paid: Number(summary.total_lohnsteuer) || 0,
-              year: extractData.results[0]?.extractedData?.year || new Date().getFullYear(),
-              employer: extractData.results[0]?.extractedData?.employer || 'Multiple Employers'
-            }
-          })
-        });
-
-        if (advisorResponse.ok) {
-          const advisorData = await advisorResponse.json();
-          if (advisorData.advisor_message) {
-            addMessage('agent', advisorData.advisor_message);
-            
-            // Set the conversation state based on advisor response
-            if (advisorData.done) {
-              setState(prev => ({ 
-                ...prev, 
-                step: 'done',
-                currentQuestion: null,
-                filedSummaries: [...prev.filedSummaries, advisorData.advisor_message]
-              }));
-            } else {
-              setState(prev => ({ 
-                ...prev, 
-                step: 'asking',
-                currentQuestion: advisorData.advisor_message
-              }));
-            }
-          } else {
-            // Fallback message if advisor doesn't respond
-            const fallbackMsg = "I've processed your documents. Please confirm the tax year and I'll help you with your tax filing. Type 'yes' to continue or 'no' if you need to upload different documents.";
-            addMessage('agent', fallbackMsg);
-            setState(prev => ({ 
-              ...prev, 
-              step: 'asking',
-              currentQuestion: fallbackMsg
-            }));
-          }
-        } else {
-          // Error handling
-          const errorMsg = "I've processed your documents, but there was an issue with the tax advisor. Please try uploading your documents again or contact support.";
-          addMessage('agent', errorMsg);
-          setState(prev => ({ ...prev, step: 'done' }));
-        }
-      }
-
-    } catch (error) {
-      console.error('Upload error:', error);
-      addMessage('agent', `❌ Error: ${error instanceof Error ? error.message : 'Upload failed'}`);
-      setState(prev => ({ ...prev, step: 'idle' }));
-    } finally {
-      setState(prev => ({ ...prev, loading: false }));
-    }
-  };
-
-  const handleAddFiles = (newFiles: FileList | null) => {
-    if (!newFiles) return;
-    
-    const pdfFiles = Array.from(newFiles).filter(file => 
-      file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
-    );
-    
-    setFiles(prev => [...prev, ...pdfFiles]);
-  };
-
-  const handleUserResponse = async (response: string) => {
-    if (!response.trim()) return;
-
-    addMessage('user', response);
-    setState(prev => ({ ...prev, loading: true }));
-
-    try {
+      // Initialize advisor with extracted data
       const advisorResponse = await fetch('/api/advisor', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          action: 'respond',
-          sessionId,
-          userMessage: response
+          action: 'initialize',
+          sessionId: 'default',
+          extractedData: data
         })
-      });
+      })
 
-      if (!advisorResponse.ok) {
-        throw new Error('Failed to get advisor response');
-      }
-
-      const advisorData = await advisorResponse.json();
-
-      if (advisorData.advisor_message) {
-        addMessage('agent', advisorData.advisor_message);
-        
-        // Check if the message contains "file a tax return for another year"
-        const isAnotherYearQuestion = advisorData.advisor_message.toLowerCase().includes('file a tax return for another year');
-        
-        // Check if this is a reset message for new year
-        const isResetForNewYear = advisorData.advisor_message.toLowerCase().includes('ready for another year') && 
-                                 advisorData.advisor_message.toLowerCase().includes('upload the pdf');
-        
-        if (advisorData.done) {
-          setState(prev => ({
-            ...prev,
-            step: 'done',
-            currentQuestion: null,
-            filedSummaries: [...prev.filedSummaries, advisorData.advisor_message]
-          }));
-        } else if (isResetForNewYear) {
-          // Reset the UI for new year filing
-          setState(prev => ({
-            ...prev,
-            step: 'idle',
-            currentQuestion: null,
-            extractedData: null,
-            loading: false
-          }));
-          
-          // Clear files for new upload
-          setFiles([]);
-          if (fileInputRef.current) {
-            fileInputRef.current.value = '';
-          }
-        } else if (isAnotherYearQuestion) {
-          // Special handling for "file for another year" question
-          setState(prev => ({
-            ...prev,
-            currentQuestion: advisorData.advisor_message,
-            step: 'asking' // Keep in asking mode to allow response
-          }));
-        } else {
-          setState(prev => ({
-            ...prev,
-            currentQuestion: advisorData.advisor_message,
-            step: 'asking'
-          }));
-        }
+      if (advisorResponse.ok) {
+        const advisorData = await advisorResponse.json()
+        setState(prev => ({
+          ...prev,
+          messages: [
+            { sender: 'assistant', text: advisorData.message }
+          ]
+        }))
       }
 
     } catch (error) {
-      console.error('Response error:', error);
-      addMessage('agent', `❌ Error: ${error instanceof Error ? error.message : 'Failed to process response'}`);
-    } finally {
-      setState(prev => ({ ...prev, loading: false }));
+      console.error('Upload error:', error)
+      setState(prev => ({ ...prev, loading: false }))
     }
-  };
+  }
+
+  const handleUserResponse = async (message: string) => {
+    setState(prev => ({
+      ...prev,
+      messages: [...prev.messages, { sender: 'user', text: message }],
+      loading: true
+    }))
+
+    try {
+      const response = await fetch('/api/advisor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'respond',
+          sessionId: 'default',
+          message: message,
+          extractedData: state.extractedData
+        })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        
+        setState(prev => ({
+          ...prev,
+          messages: [...prev.messages, { sender: 'assistant', text: data.message }],
+          loading: false,
+          deductionAnswers: data.deduction_answers || prev.deductionAnswers,
+          taxCalculation: data.tax_calculation || prev.taxCalculation,
+          deductionFlow: data.deduction_flow || prev.deductionFlow,
+          done: data.done || false
+        }))
+      }
+    } catch (error) {
+      console.error('Advisor error:', error)
+      setState(prev => ({ ...prev, loading: false }))
+    }
+  }
 
   const handleFileAnotherYear = () => {
-    setFiles([]);
     setState({
-      messages: [{
-        id: Math.random().toString(36).substring(7),
-        sender: 'agent',
-        text: "🎯 **Ready for another year!**\n\nPlease upload your PDF for the year you want to file next.",
-        timestamp: new Date()
-      }],
+      messages: [],
+      loading: false,
+      step: 'upload',
       extractedData: null,
       multiPDFData: null,
-      currentQuestion: null,
-      answers: {},
-      step: 'idle',
-      loading: false,
-      filedSummaries: state.filedSummaries,
-      uploadProgress: {}
-    });
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  };
+      filedSummaries: [...state.filedSummaries, {
+        year: state.extractedData?.year || new Date().getFullYear().toString(),
+        summary: state.taxCalculation || { taxableIncome: 0, refund: 0 },
+        deductions: state.deductionAnswers
+      }],
+      deductionAnswers: {},
+      currentQuestionIndex: 0,
+      deductionFlow: null,
+      taxCalculation: null,
+      done: false
+    })
+  }
 
   return (
-    <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100">
-      {/* Header */}
-      <header className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white shadow-2xl">
-        <div className="container mx-auto px-4 py-8">
-          <div className="flex items-center justify-center space-x-4">
-            <div className="bg-white/10 backdrop-blur-sm p-3 rounded-xl">
-              <FileText className="h-10 w-10 text-white" />
-            </div>
-            <div>
-              <h1 className="text-4xl font-bold tracking-tight">STX Advisor</h1>
-              <p className="text-blue-100 text-lg mt-1">AI-Powered Tax Assistant</p>
-            </div>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+      <div className="container mx-auto px-4 py-8">
+        <div className="max-w-4xl mx-auto">
+          <div className="text-center mb-8">
+            <h1 className="text-4xl font-bold text-gray-900 mb-2">
+              German Tax Advisor
+            </h1>
+            <p className="text-gray-600">
+              Upload your tax documents and get personalized advice
+            </p>
           </div>
-        </div>
-      </header>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col container mx-auto px-4 py-12">
-        <div className="flex-1 flex flex-col max-w-5xl mx-auto w-full">
-          <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden border border-gray-100 min-h-[400px]">
-            
-            {/* Filed Years Summary */}
-            {state.filedSummaries.length > 0 && (
-              <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-b border-green-200 p-6">
-                <div className="flex items-center space-x-3 mb-4">
-                  <div className="bg-green-500 p-2 rounded-lg">
-                    <CheckCircle className="h-6 w-6 text-white" />
-                  </div>
-                  <h3 className="font-bold text-green-800 text-xl">Completed Tax Returns</h3>
+          {state.step === 'upload' && (
+            <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
+              <div className="text-center">
+                <div className="mb-4">
+                  <svg className="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                    <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
                 </div>
-                <div className="space-y-3">
-                  {state.filedSummaries && state.filedSummaries.length > 0 && state.filedSummaries.map((summary, idx) => (
-                    <div key={idx} className="bg-white p-4 rounded-xl border border-green-200 shadow-sm">
-                      <pre className="whitespace-pre-wrap text-sm text-gray-700 font-medium">{summary}</pre>
+                <div className="mb-4">
+                  <label htmlFor="file-upload" className="cursor-pointer bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors">
+                    Choose PDF Files
+                  </label>
+                  <input
+                    id="file-upload"
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept=".pdf"
+                    onChange={(e) => e.target.files && handleFileUpload(e.target.files)}
+                    className="hidden"
+                  />
+                </div>
+                <p className="text-sm text-gray-500">
+                  Upload your German tax documents (Lohnsteuerbescheinigung, etc.)
+                </p>
+              </div>
+            </div>
+          )}
+
+          {state.multiPDFData && (
+            <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
+              <div className="border-b border-gray-200 pb-4 mb-4">
+                <h2 className="text-2xl font-semibold text-gray-900 mb-2">
+                  📊 Document Analysis Complete
+                </h2>
+                <p className="text-gray-600">
+                  Successfully processed {state.multiPDFData.totalFiles} document{state.multiPDFData.totalFiles !== 1 ? 's' : ''}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className="bg-blue-50 rounded-lg p-4">
+                  <div className="text-sm font-medium text-blue-600">Total Income</div>
+                  <div className="text-2xl font-bold text-blue-900">
+                    €{Number(state.multiPDFData.summary.grossIncome).toFixed(2)}
+                  </div>
+                </div>
+                <div className="bg-red-50 rounded-lg p-4">
+                  <div className="text-sm font-medium text-red-600">Tax Paid</div>
+                  <div className="text-2xl font-bold text-red-900">
+                    €{Number(state.multiPDFData.summary.incomeTaxPaid).toFixed(2)}
+                  </div>
+                </div>
+                <div className="bg-green-50 rounded-lg p-4">
+                  <div className="text-sm font-medium text-green-600">Employer</div>
+                  <div className="text-lg font-semibold text-green-900">
+                    {state.multiPDFData.summary.employer}
+                  </div>
+                </div>
+              </div>
+
+              <details className="bg-gray-50 rounded-lg p-4">
+                <summary className="cursor-pointer font-medium text-gray-700 hover:text-gray-900">
+                  📄 Individual Document Results
+                </summary>
+                <div className="mt-4 space-y-3">
+                  {state.multiPDFData.results && state.multiPDFData.results.length > 0 && state.multiPDFData.results.map((result: any, index: number) => (
+                    <div key={index} className="bg-white rounded border p-3">
+                      <div className="font-medium text-gray-900">{result.name || 'Document ' + (index + 1)}</div>
+                      <div className="text-sm text-gray-600">
+                        Income: €{Number(result.bruttolohn || 0).toFixed(2)} | 
+                        Tax: €{Number(result.lohnsteuer || 0).toFixed(2)}
+                      </div>
                     </div>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {/* Chat Messages */}
-            <div className="flex-1 overflow-y-auto px-4 py-6 space-y-4" style={{ maxHeight: 'calc(100vh - 200px)' }}>
-              {state.messages && state.messages.length > 0 && state.messages.map((message, index) => (
-                <div
-                  key={index}
-                  className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    className={`max-w-[80%] px-6 py-4 rounded-2xl ${
-                      message.sender === 'user'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-white text-gray-800 border border-gray-200 shadow-sm'
-                    }`}
-                  >
-                    <div className="whitespace-pre-wrap">{message.text}</div>
-                  </div>
-                </div>
-              ))}
-              
-              {state.loading && (
-                <div className="flex justify-start">
-                  <div className="bg-white text-gray-800 border border-gray-200 shadow-sm px-6 py-4 rounded-2xl">
-                    <div className="flex items-center space-x-2">
-                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
-                      <span className="text-sm text-gray-600">Processing...</span>
-                    </div>
-                  </div>
-                </div>
-              )}
+              </details>
             </div>
+          )}
 
-            {/* Multi-PDF Results Display */}
-            {state.multiPDFData && state.multiPDFData.results && (
-              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-2xl border border-blue-200 shadow-sm">
-                <div className="space-y-6">
-                  {/* Header */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-blue-100 p-2 rounded-lg">
-                        <BarChart3 className="h-6 w-6 text-blue-600" />
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-bold text-gray-900">Document Processing Complete</h3>
-                        <p className="text-sm text-gray-600">Successfully processed {state.multiPDFData.results.length} PDF files</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-2xl font-bold text-blue-600">
-                        €{isNaN(Number(state.multiPDFData.summary?.total_bruttolohn)) ? '0.00' : Number(state.multiPDFData.summary.total_bruttolohn).toFixed(2)}
-                      </div>
-                      <div className="text-xs text-gray-500">Total Income</div>
-                    </div>
-                  </div>
-                  
-                  {/* Summary Cards */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                      <div className="flex items-center space-x-3">
-                        <div className="bg-green-100 p-2 rounded-lg">
-                          <DollarSign className="h-5 w-5 text-green-600" />
-                        </div>
-                        <div>
-                          <div className="text-sm text-gray-600">Total Tax Paid</div>
-                          <div className="text-lg font-semibold text-gray-900">
-                            €{isNaN(Number(state.multiPDFData.summary?.total_lohnsteuer)) ? '0.00' : Number(state.multiPDFData.summary.total_lohnsteuer).toFixed(2)}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                      <div className="flex items-center space-x-3">
-                        <div className="bg-purple-100 p-2 rounded-lg">
-                          <DollarSign className="h-5 w-5 text-purple-600" />
-                        </div>
-                        <div>
-                          <div className="text-sm text-gray-600">Solidaritätszuschlag</div>
-                          <div className="text-lg font-semibold text-gray-900">
-                            €{isNaN(Number(state.multiPDFData.summary?.total_solidaritaetszuschlag)) ? '0.00' : Number(state.multiPDFData.summary.total_solidaritaetszuschlag).toFixed(2)}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
-                      <div className="flex items-center space-x-3">
-                        <div className="bg-orange-100 p-2 rounded-lg">
-                          <Calendar className="h-5 w-5 text-orange-600" />
-                        </div>
-                        <div>
-                          <div className="text-sm text-gray-600">Tax Year</div>
-                          <div className="text-lg font-semibold text-gray-900">
-                            {state.multiPDFData.results[0]?.extractedData?.year || 'N/A'}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Collapsible Details */}
-                  <details className="bg-white rounded-xl border border-gray-200 shadow-sm">
-                    <summary className="p-4 cursor-pointer hover:bg-gray-50 rounded-xl transition-colors">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
-                          <FileText className="h-5 w-5 text-gray-600" />
-                          <span className="font-semibold text-gray-800">View Individual Documents ({state.multiPDFData.results.length} files)</span>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <span className="text-sm text-gray-500">Click to expand</span>
-                          <ChevronDown className="h-4 w-4 text-gray-500" />
-                        </div>
-                      </div>
-                    </summary>
-                    <div className="p-4 border-t border-gray-200 space-y-3 max-h-96 overflow-y-auto">
-                      {state.multiPDFData.results && state.multiPDFData.results.length > 0 && state.multiPDFData.results.map((result, index) => (
-                        <div key={index} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                          <div className="flex items-center justify-between mb-3">
-                            <h5 className="font-medium text-gray-800 text-sm truncate max-w-xs">{result.filename}</h5>
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              result.success ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                            }`}>
-                              {result.success ? '✓ Success' : '✗ Failed'}
-                            </span>
-                          </div>
-                          
-                          {result.success && result.extractedData && (
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                              {result.extractedData.name && (
-                                <div>
-                                  <div className="text-gray-500 font-medium">Name</div>
-                                  <div className="text-gray-800 truncate">{result.extractedData.name}</div>
-                                </div>
-                              )}
-                              {result.extractedData.employer && (
-                                <div>
-                                  <div className="text-gray-500 font-medium">Employer</div>
-                                  <div className="text-gray-800 truncate">{result.extractedData.employer}</div>
-                                </div>
-                              )}
-                              {result.extractedData.bruttolohn && (
-                                <div>
-                                  <div className="text-gray-500 font-medium">Income</div>
-                                  <div className="text-gray-800 font-semibold">€{isNaN(Number(result.extractedData.bruttolohn)) ? 'N/A' : Number(result.extractedData.bruttolohn).toFixed(2)}</div>
-                                </div>
-                              )}
-                              {result.extractedData.lohnsteuer && (
-                                <div>
-                                  <div className="text-gray-500 font-medium">Tax</div>
-                                  <div className="text-gray-800 font-semibold">€{isNaN(Number(result.extractedData.lohnsteuer)) ? 'N/A' : Number(result.extractedData.lohnsteuer).toFixed(2)}</div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                          
-                          {!result.success && result.error && (
-                            <div className="text-red-600 text-xs">
-                              <span className="font-medium">Error:</span> {result.error}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </details>
-                </div>
+          {state.step === 'advisor' && (
+            <div className="bg-white rounded-lg shadow-lg overflow-hidden">
+              <div className="bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-4">
+                <h2 className="text-xl font-semibold text-white">
+                  💬 Tax Advisor Chat
+                </h2>
               </div>
-            )}
 
-            {/* Input Area */}
-            <div className="border-t bg-gradient-to-r from-gray-50 to-blue-50 p-6">
-              {state.step === 'idle' && (
-                <div className="space-y-6">
-                  <div>
-                    <label className="block text-lg font-semibold text-gray-800 mb-3">
-                      📁 Upload Your Tax Documents
-                    </label>
-                    <div className="flex items-center space-x-4">
+              <div className="flex flex-col h-96">
+                <div 
+                  ref={chatContainerRef}
+                  className="flex-1 overflow-y-auto px-4 py-6 space-y-4" 
+                  style={{ maxHeight: 'calc(100vh - 200px)' }}
+                >
+                  {state.messages && state.messages.length > 0 && state.messages.map((message, index) => (
+                    <div
+                      key={index}
+                      className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div
+                        className={`max-w-[80%] px-6 py-4 rounded-2xl ${
+                          message.sender === 'user'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white text-gray-800 border border-gray-200 shadow-sm'
+                        }`}
+                      >
+                        <div className="whitespace-pre-wrap">{message.text}</div>
+                      </div>
+                    </div>
+                  ))}
+                  {state.loading && (
+                    <div className="flex justify-start">
+                      <div className="bg-white text-gray-800 border border-gray-200 shadow-sm px-6 py-4 rounded-2xl">
+                        <div className="flex items-center space-x-2">
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                          <span className="text-sm text-gray-600">Processing...</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {!state.done && (
+                  <div className="border-t border-gray-200 p-4">
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault()
+                        const input = e.currentTarget.elements.namedItem('message') as HTMLInputElement
+                        if (input.value.trim()) {
+                          handleUserResponse(input.value.trim())
+                          input.value = ''
+                        }
+                      }}
+                      className="flex space-x-4"
+                    >
                       <input
-                        ref={fileInputRef}
-                        type="file"
-                        accept="application/pdf"
-                        multiple
-                        onChange={(e) => handleAddFiles(e.target.files)}
-                        className="block w-full text-sm text-gray-600 file:mr-4 file:py-3 file:px-6 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-blue-100 file:text-blue-700 hover:file:bg-blue-200 transition-colors"
+                        type="text"
+                        name="message"
+                        placeholder="Type your response..."
+                        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        disabled={state.loading}
                       />
                       <button
-                        onClick={handleFileUpload}
-                        disabled={files.length === 0 || state.loading}
-                        className="flex items-center space-x-2 px-8 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl"
+                        type="submit"
+                        disabled={state.loading}
+                        className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
                       >
-                        <Upload className="h-5 w-5" />
-                        <span className="font-semibold">{state.loading ? 'Processing...' : 'Upload & Analyze'}</span>
+                        Send
                       </button>
-                    </div>
-                    <p className="text-sm text-gray-500 mt-2">
-                      Select one or more PDF files to get started
-                    </p>
+                    </form>
                   </div>
-                </div>
-              )}
+                )}
 
-              {state.step === 'asking' && state.currentQuestion && (
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    const input = e.currentTarget.elements.namedItem('response') as HTMLInputElement;
-                    if (input.value.trim()) {
-                      handleUserResponse(input.value);
-                      input.value = '';
-                    }
-                  }}
-                  className="flex space-x-4"
-                >
-                  <input
-                    name="response"
-                    type="text"
-                    placeholder="Type your answer here..."
-                    disabled={state.loading}
-                    className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50 text-lg text-gray-900 bg-white"
-                    autoFocus
-                  />
-                  <button
-                    type="submit"
-                    disabled={state.loading}
-                    className="px-8 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg hover:shadow-xl"
-                  >
-                    <Send className="h-5 w-5" />
-                  </button>
-                </form>
-              )}
-
-              {state.step === 'done' && (
-                <div className="text-center space-y-6">
-                  <div className="flex items-center justify-center space-x-3">
-                    <div className="bg-green-500 p-3 rounded-full">
-                      <CheckCircle className="h-8 w-8 text-white" />
-                    </div>
-                    <div>
-                      <h3 className="text-2xl font-bold text-gray-800">🎉 All Done!</h3>
-                      <p className="text-gray-600">Your tax analysis is complete</p>
-                    </div>
+                {state.done && (
+                  <div className="border-t border-gray-200 p-4">
+                    <button
+                      onClick={handleFileAnotherYear}
+                      className="w-full px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                    >
+                      File for Another Year
+                    </button>
                   </div>
-                  
-                  <button
-                    onClick={handleFileAnotherYear}
-                    className="px-8 py-3 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all shadow-lg hover:shadow-xl font-semibold"
-                  >
-                    📅 File for Another Year
-                  </button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
-          </div>
-        </div>
-      </main>
+          )}
 
-      {/* Footer */}
-      <footer className="bg-gradient-to-r from-gray-800 to-gray-900 text-white">
-        <div className="container mx-auto px-4 py-8 text-center">
-          <p className="text-gray-300">© {new Date().getFullYear()} STX Advisor. AI-Powered Tax Assistance</p>
-          <p className="text-gray-400 text-sm mt-2">
-            Built with ❤️ for German taxpayers • <a href="mailto:support@stxadvisor.com" className="text-blue-400 hover:text-blue-300 transition-colors">Get Support</a>
-          </p>
+          {state.filedSummaries && state.filedSummaries.length > 0 && (
+            <div className="bg-white rounded-lg shadow-lg p-6 mt-8">
+              <h3 className="text-xl font-semibold text-gray-900 mb-4">
+                📋 Previous Filings
+              </h3>
+              <div className="space-y-3">
+                {state.filedSummaries.map((summary, index) => (
+                  <div key={index} className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <div className="font-medium text-gray-900">Year {summary.year}</div>
+                        <div className="text-sm text-gray-600">
+                          Taxable Income: €{summary.summary.taxableIncome?.toFixed(2) || '0.00'} | 
+                          Refund: €{summary.summary.refund?.toFixed(2) || '0.00'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-      </footer>
+      </div>
     </div>
-  );
+  )
 }
