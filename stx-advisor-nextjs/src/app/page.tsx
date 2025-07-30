@@ -90,28 +90,89 @@ export default function TaxAdvisorApp() {
       })
 
       if (!response.ok) {
-        throw new Error('Extraction failed')
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || 'Extraction failed')
       }
 
       const data = await response.json()
       console.log('Data extracted:', data)
 
+      // Handle the new response format
+      if (!data.success) {
+        throw new Error(data.error || 'Extraction failed')
+      }
+
+      // Aggregate the results from successful extractions
+      const successfulResults = data.results || []
+      let totalGrossIncome = 0
+      let totalIncomeTaxPaid = 0
+      let totalSolidaritaetszuschlag = 0
+      let employer = ''
+      let fullName = ''
+      let year = ''
+
+      successfulResults.forEach((result: any) => {
+        const resultData = result.data
+        if (resultData.bruttolohn) {
+          const bruttolohn = typeof resultData.bruttolohn === 'string' ? parseFloat(resultData.bruttolohn) : resultData.bruttolohn
+          if (!isNaN(bruttolohn)) {
+            totalGrossIncome += bruttolohn
+          }
+        }
+        
+        if (resultData.lohnsteuer) {
+          const lohnsteuer = typeof resultData.lohnsteuer === 'string' ? parseFloat(resultData.lohnsteuer) : resultData.lohnsteuer
+          if (!isNaN(lohnsteuer)) {
+            totalIncomeTaxPaid += lohnsteuer
+          }
+        }
+        
+        if (resultData.solidaritaetszuschlag) {
+          const solidaritaetszuschlag = typeof resultData.solidaritaetszuschlag === 'string' ? parseFloat(resultData.solidaritaetszuschlag) : resultData.solidaritaetszuschlag
+          if (!isNaN(solidaritaetszuschlag)) {
+            totalSolidaritaetszuschlag += solidaritaetszuschlag
+          }
+        }
+
+        if (resultData.employer && !employer) {
+          employer = resultData.employer
+        }
+        
+        if (resultData.name && !fullName) {
+          fullName = resultData.name
+        }
+        
+        if (resultData.year && !year) {
+          year = resultData.year.toString()
+        }
+      })
+
+      const aggregatedData = {
+        year: year || new Date().getFullYear().toString(),
+        gross_income: totalGrossIncome,
+        income_tax_paid: totalIncomeTaxPaid,
+        solidaritaetszuschlag: totalSolidaritaetszuschlag,
+        employer: employer || 'Unknown',
+        full_name: fullName || 'User',
+        results: successfulResults
+      }
+
       // Check for existing data for this year
-      const year = parseInt(data.year) || new Date().getFullYear()
-      const existingFiling = await checkExistingDataForYear(year)
+      const yearNum = parseInt(aggregatedData.year) || new Date().getFullYear()
+      const existingFiling = await checkExistingDataForYear(yearNum)
 
       setState(prev => ({
         ...prev,
-        extractedData: data,
+        extractedData: aggregatedData,
         multiPDFData: {
           totalFiles: files.length,
-          results: data.results || [],
+          results: successfulResults,
           summary: {
-            year: data.year,
-            grossIncome: data.gross_income,
-            incomeTaxPaid: data.income_tax_paid,
-            employer: data.employer,
-            fullName: data.full_name
+            year: aggregatedData.year,
+            grossIncome: aggregatedData.gross_income,
+            incomeTaxPaid: aggregatedData.income_tax_paid,
+            employer: aggregatedData.employer,
+            fullName: aggregatedData.full_name
           }
         },
         step: 'advisor',
@@ -119,7 +180,7 @@ export default function TaxAdvisorApp() {
       }))
 
       // Load suggested deductions for this year
-      const suggestions = await getSuggestedDeductions(year)
+      const suggestions = await getSuggestedDeductions(yearNum)
       setSuggestedDeductions(suggestions)
 
       // Initialize advisor with extracted data
@@ -129,7 +190,7 @@ export default function TaxAdvisorApp() {
         body: JSON.stringify({
           action: 'initialize',
           sessionId: 'default',
-          extractedData: data,
+          extractedData: aggregatedData,
           existingData: existingFiling,
           suggestedDeductions: suggestions
         })
@@ -147,7 +208,14 @@ export default function TaxAdvisorApp() {
 
     } catch (error) {
       console.error('Upload error:', error)
-      setState(prev => ({ ...prev, loading: false }))
+      setState(prev => ({ 
+        ...prev, 
+        loading: false,
+        messages: [...prev.messages, { 
+          sender: 'assistant', 
+          text: `Error: ${error instanceof Error ? error.message : 'Upload failed'}. Please try again with smaller files or check your internet connection.` 
+        }]
+      }))
     }
   }
 

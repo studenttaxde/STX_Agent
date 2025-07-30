@@ -14,94 +14,89 @@ export async function POST(request: NextRequest) {
       const formDataToSend = new FormData()
       formDataToSend.append('file', file)
 
-      // Add timeout to the fetch request
+      // Increase timeout to 60 seconds for PDF processing
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 60000) // 60 second timeout
 
       try {
         const response = await fetch(`${config.backendUrl}/extract-text`, {
           method: 'POST',
           body: formDataToSend,
           signal: controller.signal,
+          headers: {
+            'Accept': 'application/json',
+          }
         })
 
         clearTimeout(timeoutId)
 
         if (!response.ok) {
-          throw new Error(`Failed to extract text from ${file.name}: ${response.status}`)
+          const errorText = await response.text()
+          console.error(`Backend error for ${file.name}:`, response.status, errorText)
+          throw new Error(`Backend error: ${response.status} - ${errorText}`)
         }
 
-        return response.json()
+        const result = await response.json()
+        return {
+          filename: file.name,
+          success: true,
+          data: result
+        }
       } catch (error) {
         clearTimeout(timeoutId)
+        
         if (error instanceof Error && error.name === 'AbortError') {
-          throw new Error(`Timeout extracting text from ${file.name}`)
+          console.error(`Timeout for ${file.name} after 60 seconds`)
+          return {
+            filename: file.name,
+            success: false,
+            error: 'Request timed out after 60 seconds. Please try with a smaller file or check your internet connection.'
+          }
         }
-        throw error
+        
+        console.error(`Error processing ${file.name}:`, error)
+        return {
+          filename: file.name,
+          success: false,
+          error: error instanceof Error ? error.message : 'Extraction failed'
+        }
       }
     })
 
     const results = await Promise.all(uploadPromises)
-
-    // Aggregate the results
-    let totalGrossIncome = 0
-    let totalIncomeTaxPaid = 0
-    let totalSolidaritaetszuschlag = 0
-    let employer = ''
-    let fullName = ''
-    let year = ''
-
-    results.forEach((result) => {
-      if (result.bruttolohn) {
-        const bruttolohn = typeof result.bruttolohn === 'string' ? parseFloat(result.bruttolohn) : result.bruttolohn
-        if (!isNaN(bruttolohn)) {
-          totalGrossIncome += bruttolohn
-        }
-      }
-      
-      if (result.lohnsteuer) {
-        const lohnsteuer = typeof result.lohnsteuer === 'string' ? parseFloat(result.lohnsteuer) : result.lohnsteuer
-        if (!isNaN(lohnsteuer)) {
-          totalIncomeTaxPaid += lohnsteuer
-        }
-      }
-      
-      if (result.solidaritaetszuschlag) {
-        const solidaritaetszuschlag = typeof result.solidaritaetszuschlag === 'string' ? parseFloat(result.solidaritaetszuschlag) : result.solidaritaetszuschlag
-        if (!isNaN(solidaritaetszuschlag)) {
-          totalSolidaritaetszuschlag += solidaritaetszuschlag
-        }
-      }
-
-      if (result.employer && !employer) {
-        employer = result.employer
-      }
-      
-      if (result.name && !fullName) {
-        fullName = result.name
-      }
-      
-      if (result.year && !year) {
-        year = result.year.toString()
-      }
+    
+    // Check if any files were processed successfully
+    const successfulResults = results.filter(r => r.success)
+    const failedResults = results.filter(r => !r.success)
+    
+    if (successfulResults.length === 0) {
+      return NextResponse.json({
+        error: 'All files failed to process',
+        details: failedResults
+      }, { status: 500 })
+    }
+    
+    // If some files failed, return partial success
+    if (failedResults.length > 0) {
+      return NextResponse.json({
+        success: true,
+        message: `Processed ${successfulResults.length} files successfully, ${failedResults.length} failed`,
+        results: successfulResults,
+        failed: failedResults
+      })
+    }
+    
+    // All files processed successfully
+    return NextResponse.json({
+      success: true,
+      results: successfulResults
     })
 
-    const aggregatedData = {
-      year: year || new Date().getFullYear().toString(),
-      gross_income: totalGrossIncome,
-      income_tax_paid: totalIncomeTaxPaid,
-      solidaritaetszuschlag: totalSolidaritaetszuschlag,
-      employer: employer || 'Unknown',
-      full_name: fullName || 'User',
-      results: results
-    }
-
-    return NextResponse.json(aggregatedData)
   } catch (error) {
-    console.error('Error processing files:', error)
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'Failed to process files' },
-      { status: 500 }
-    )
+    console.error('PDF extraction error:', error)
+    return NextResponse.json({
+      error: 'Extraction failed',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 })
   }
 }
