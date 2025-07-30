@@ -1,7 +1,0 @@
-# requirements.txt
-langchain
-openai
-pymupdf
-python-dotenv 
-fastapi
-uvicorn 

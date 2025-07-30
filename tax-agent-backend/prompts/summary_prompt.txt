@@ -1,2 +1,0 @@
-# Summary Prompt Template
-# TODO: Write the prompt for summarizing extracted data and user responses. 
