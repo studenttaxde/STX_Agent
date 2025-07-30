@@ -1,35 +1,27 @@
 import OpenAI from 'openai';
 import { ChatOpenAI } from '@langchain/openai';
 import { BufferMemory } from 'langchain/memory';
+import { HumanMessage, AIMessage } from '@langchain/core/messages';
 import { AgentExecutor, createOpenAIFunctionsAgent } from 'langchain/agents';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
-import { tool } from '@langchain/core/tools';
-import { RunnableSequence } from '@langchain/core/runnables';
 import { 
   ExtractedData, 
   UserData, 
   ConversationHistory, 
-  TaxAdvisorState, 
   UserStatus, 
   DeductionQuestion, 
   DeductionAnswer, 
   DeductionFlow, 
   TaxCalculation, 
-  DeductionSummary 
+  DeductionSummary,
+  TaxAdvisorState
 } from '@/types';
 
 export class TaxAdvisor {
   private static readonly TAX_FREE_THRESHOLDS: Record<number, number> = {
-    2017: 8820,
-    2018: 9000,
-    2019: 9168,
-    2020: 9408,
-    2021: 9744,
-    2022: 10347,
-    2023: 10908,
-    2024: 11604,
-    2025: 12300
+    2024: 10908,
+    2025: 11280,
+    2026: 11640
   };
 
   private openai: OpenAI;
@@ -38,212 +30,138 @@ export class TaxAdvisor {
   private state: TaxAdvisorState;
   private agentExecutor: AgentExecutor | null = null;
 
-
-  // Deduction flow definitions
   private readonly deductionFlowMap: Record<UserStatus, DeductionFlow> = {
     bachelor: {
       status: 'bachelor',
       questions: [
         {
-          id: 'semester_fees',
-          question: 'How much did you pay for semester/tuition fees? (amount in €)',
+          id: 'bachelor_tuition',
+          question: 'Did you pay tuition fees for your bachelor studies?',
           category: 'Education',
           maxAmount: 6000
         },
         {
-          id: 'laptop_materials',
-          question: 'How much did you spend on laptop, printer, or study materials? (amount in €)',
+          id: 'bachelor_books',
+          question: 'Did you purchase books, study materials, or equipment for your studies?',
           category: 'Education',
           maxAmount: 1000
         },
         {
-          id: 'desk_chair',
-          question: 'How much did you spend on desk or chair for studying? (amount in €)',
-          category: 'Home Office',
-          maxAmount: 500
-        },
-        {
-          id: 'commute_university',
-          question: 'What is your commute distance to university? (km one-way)',
+          id: 'bachelor_travel',
+          question: 'Did you have travel expenses for your studies (commuting, field trips)?',
           category: 'Travel',
           maxAmount: 4500
         },
         {
-          id: 'application_costs',
-          question: 'How much did you spend on application costs for internships/jobs? (amount in €)',
-          category: 'Professional Development',
+          id: 'bachelor_work',
+          question: 'Did you have work-related expenses (internships, part-time work)?',
+          category: 'Work',
           maxAmount: 1000
-        },
-        {
-          id: 'relocation',
-          question: 'How much did you spend on work-related relocation costs? (amount in €)',
-          category: 'Relocation',
-          maxAmount: 1000
-        },
-        {
-          id: 'language_courses',
-          question: 'How much did you pay for language course fees? (amount in €)',
-          category: 'Education',
-          maxAmount: 1000
-        },
-        {
-          id: 'mobile_internet',
-          question: 'How much of your mobile/internet costs were used for studies? (amount in €)',
-          category: 'Home Office',
-          maxAmount: 500
         }
       ],
-      order: ['semester_fees', 'laptop_materials', 'desk_chair', 'commute_university', 'application_costs', 'relocation', 'language_courses', 'mobile_internet']
+      order: ['bachelor_tuition', 'bachelor_books', 'bachelor_travel', 'bachelor_work']
     },
     master: {
       status: 'master',
       questions: [
         {
-          id: 'tuition_fees',
-          question: 'How much did you pay for tuition/semester fees? (amount in €)',
+          id: 'master_tuition',
+          question: 'Did you pay tuition fees for your master studies?',
           category: 'Education',
           maxAmount: 6000
         },
         {
-          id: 'laptop_equipment',
-          question: 'How much did you spend on laptop or study equipment? (amount in €)',
+          id: 'master_books',
+          question: 'Did you purchase books, study materials, or equipment for your studies?',
           category: 'Education',
           maxAmount: 1000
         },
         {
-          id: 'home_office_setup',
-          question: 'How much did you spend on home office setup for your studies? (amount in €)',
-          category: 'Home Office',
-          maxAmount: 1250
-        },
-        {
-          id: 'internet_mobile',
-          question: 'How much of your internet/mobile costs were used for study? (amount in €)',
-          category: 'Home Office',
-          maxAmount: 500
-        },
-        {
-          id: 'travel_university',
-          question: 'What is your commute distance to university? (km one-way)',
+          id: 'master_travel',
+          question: 'Did you have travel expenses for your studies (commuting, field trips)?',
           category: 'Travel',
           maxAmount: 4500
         },
         {
-          id: 'books_software',
-          question: 'How much did you spend on books, software, or courses? (amount in €)',
-          category: 'Education',
+          id: 'master_work',
+          question: 'Did you have work-related expenses (internships, part-time work)?',
+          category: 'Work',
           maxAmount: 1000
         },
         {
-          id: 'application_costs',
-          question: 'How much did you spend on application costs? (amount in €)',
-          category: 'Professional Development',
-          maxAmount: 1000
-        },
-        {
-          id: 'relocation',
-          question: 'How much did you spend on relocation costs? (amount in €)',
-          category: 'Relocation',
-          maxAmount: 1000
+          id: 'master_research',
+          question: 'Did you have research-related expenses (conferences, publications)?',
+          category: 'Research',
+          maxAmount: 2000
         }
       ],
-      order: ['tuition_fees', 'laptop_equipment', 'home_office_setup', 'internet_mobile', 'travel_university', 'books_software', 'application_costs', 'relocation']
+      order: ['master_tuition', 'master_books', 'master_travel', 'master_work', 'master_research']
     },
     new_employee: {
       status: 'new_employee',
       questions: [
         {
-          id: 'application_costs',
-          question: 'How much did you spend on job application costs? (amount in €)',
-          category: 'Professional Development',
+          id: 'new_work_tools',
+          question: 'Did you purchase work-related tools, equipment, or software?',
+          category: 'Work',
           maxAmount: 1000
         },
         {
-          id: 'relocation',
-          question: 'How much did you spend on relocation costs for your new job? (amount in €)',
-          category: 'Relocation',
-          maxAmount: 1000
-        },
-        {
-          id: 'work_equipment',
-          question: 'How much did you spend on work equipment or tools? (amount in €)',
-          category: 'Work Equipment',
-          maxAmount: 1000
-        },
-        {
-          id: 'commute_work',
-          question: 'What is your commute distance to work? (km one-way)',
+          id: 'new_commuting',
+          question: 'Did you have commuting expenses to your new workplace?',
           category: 'Travel',
           maxAmount: 4500
         },
         {
-          id: 'work_clothing',
-          question: 'How much did you spend on work clothing or uniforms? (amount in €)',
-          category: 'Work Expenses',
+          id: 'new_work_clothes',
+          question: 'Did you purchase work-specific clothing or uniforms?',
+          category: 'Work',
           maxAmount: 500
         },
         {
-          id: 'training_courses',
-          question: 'How much did you spend on professional training or courses? (amount in €)',
-          category: 'Professional Development',
+          id: 'new_education',
+          question: 'Did you take any courses or training for your new job?',
+          category: 'Education',
           maxAmount: 1000
         }
       ],
-      order: ['application_costs', 'relocation', 'work_equipment', 'commute_work', 'work_clothing', 'training_courses']
+      order: ['new_work_tools', 'new_commuting', 'new_work_clothes', 'new_education']
     },
     full_time: {
       status: 'full_time',
       questions: [
         {
-          id: 'work_equipment',
-          question: 'How much did you spend on work equipment or tools? (amount in €)',
-          category: 'Work Equipment',
+          id: 'full_work_tools',
+          question: 'Did you purchase work-related tools, equipment, or software?',
+          category: 'Work',
           maxAmount: 1000
         },
         {
-          id: 'commute_work',
-          question: 'What is your commute distance to work? (km one-way)',
+          id: 'full_commuting',
+          question: 'Did you have commuting expenses to your workplace?',
           category: 'Travel',
           maxAmount: 4500
         },
         {
-          id: 'work_clothing',
-          question: 'How much did you spend on work clothing or uniforms? (amount in €)',
-          category: 'Work Expenses',
+          id: 'full_work_clothes',
+          question: 'Did you purchase work-specific clothing or uniforms?',
+          category: 'Work',
           maxAmount: 500
         },
         {
-          id: 'home_office',
-          question: 'How much did you spend on home office setup? (amount in €)',
-          category: 'Home Office',
+          id: 'full_education',
+          question: 'Did you take any courses or training for your job?',
+          category: 'Education',
+          maxAmount: 1000
+        },
+        {
+          id: 'full_home_office',
+          question: 'Did you have home office expenses (furniture, equipment)?',
+          category: 'Work',
           maxAmount: 1250
-        },
-        {
-          id: 'internet_mobile_work',
-          question: 'How much of your internet/mobile costs were used for work? (amount in €)',
-          category: 'Home Office',
-          maxAmount: 500
-        },
-        {
-          id: 'training_courses',
-          question: 'How much did you spend on professional training or courses? (amount in €)',
-          category: 'Professional Development',
-          maxAmount: 1000
-        },
-        {
-          id: 'union_fees',
-          question: 'How much did you pay for union or professional association fees? (amount in €)',
-          category: 'Professional Development',
-          maxAmount: 1000
-        },
-        {
-          id: 'work_insurance',
-          question: 'How much did you pay for work-related insurance? (amount in €)',
-          category: 'Work Expenses',
-          maxAmount: 500
         }
       ],
-      order: ['work_equipment', 'commute_work', 'work_clothing', 'home_office', 'internet_mobile_work', 'training_courses', 'union_fees', 'work_insurance']
+      order: ['full_work_tools', 'full_commuting', 'full_work_clothes', 'full_education', 'full_home_office']
     }
   };
 
@@ -262,36 +180,31 @@ export class TaxAdvisor {
       memoryKey: 'chat_history'
     });
     
-            // Set up LangSmith environment variables for server-side tracing
-        if (typeof window === 'undefined') {
-          process.env.LANGCHAIN_TRACING_V2 = 'true';
-          process.env.LANGCHAIN_PROJECT = process.env.LANGCHAIN_PROJECT || 'STX_Advisor';
-          process.env.LANGCHAIN_ENDPOINT = process.env.LANGCHAIN_ENDPOINT || 'https://api.smith.langchain.com';
-          process.env.LANGCHAIN_API_KEY = process.env.LANGCHAIN_API_KEY || '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';
-        }
+    // Set up LangSmith environment variables for server-side tracing
+    if (typeof window === 'undefined') {
+      process.env.LANGCHAIN_TRACING_V2 = 'true';
+      process.env.LANGCHAIN_PROJECT = process.env.LANGCHAIN_PROJECT || 'STX_Advisor';
+      process.env.LANGCHAIN_ENDPOINT = process.env.LANGCHAIN_ENDPOINT || 'https://api.smith.langchain.com';
+      process.env.LANGCHAIN_API_KEY = process.env.LANGCHAIN_API_KEY || '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';
+    }
     
     this.state = {
-      conversationHistory: [],
-      extractedData: {},
-      userData: {},
-      askedQuestions: new Set(),
-      filedYears: new Set(),
+      messages: [],
+      loading: false,
+      step: 'upload',
+      extractedData: null,
+      multiPDFData: null,
+      filedSummaries: [],
       deductionAnswers: {},
       currentQuestionIndex: 0,
-      deductionFlow: undefined,
-      taxCalculation: undefined,
+      deductionFlow: null,
+      taxCalculation: null,
       done: false
     };
   }
 
   setExtractedData(data: ExtractedData): void {
     this.state.extractedData = data;
-    const year = data.year;
-    if (year) {
-      this.state.userData.year = year;
-    }
-    this.state.userData.gross_income = data.gross_income;
-    this.state.userData.income_tax_paid = data.income_tax_paid;
     
     // Log data extraction for debugging
     console.log('Data extracted:', {
@@ -304,13 +217,13 @@ export class TaxAdvisor {
   }
 
   addUserMessage(message: string): void {
-    this.state.conversationHistory.push({ role: 'user', content: message });
+    this.state.messages.push({ sender: 'user', text: message });
     // Also add to LangChain memory
     this.memory.chatHistory.addMessage(new HumanMessage(message));
   }
 
   addAgentMessage(message: string): void {
-    this.state.conversationHistory.push({ role: 'assistant', content: message });
+    this.state.messages.push({ sender: 'assistant', text: message });
     // Also add to LangChain memory
     this.memory.chatHistory.addMessage(new AIMessage(message));
   }
@@ -379,74 +292,54 @@ export class TaxAdvisor {
               return `Income (€${income}) is below the tax-free threshold (€${threshold}) for ${year}. No deductions needed.`;
             }
             
-            const deductions = deductionFlow.questions.map(q => q.category).join(', ');
-            return `Available deductions for ${status}: ${deductions}`;
+            const totalMaxDeductions = deductionFlow.questions.reduce((sum, q) => sum + (q.maxAmount || 0), 0);
+            return `For ${status} status in ${year}, maximum potential deductions: €${totalMaxDeductions}. Questions: ${deductionFlow.questions.length}`;
           } catch (error) {
             throw error;
           }
         }
       }
     ];
-
+    
     return tools;
   }
 
   private async initializeAgent(): Promise<void> {
-    if (this.agentExecutor) return;
-
-    try {
-      const tools = this.createTaxTools();
+    const tools = this.createTaxTools();
+    
+    const prompt = ChatPromptTemplate.fromMessages([
+      ['system', `You are a German tax advisor helping users with their tax returns. 
       
-      const prompt = ChatPromptTemplate.fromTemplate(`
-You are a professional German tax advisor assistant. You help users with their tax returns and provide accurate, helpful advice.
+Your role is to:
+1. Analyze extracted tax data from PDFs
+2. Guide users through deduction questions
+3. Calculate potential tax refunds
+4. Provide clear, helpful responses
 
-Current user data:
-- Year: {year}
-- Gross Income: €{gross_income}
-- Tax Paid: €{tax_paid}
-- Status: {status}
-- Filed Years: {filed_years}
-- Current Deduction Flow: {current_deduction_flow}
-- Current Question Index: {current_question_index}
-- Deduction Answers: {deduction_answers}
+Always be professional, accurate, and helpful. Use the available tools to perform calculations.`],
+      ['human', '{input}'],
+      ['human', '{agent_scratchpad}']
+    ]);
 
-IMPORTANT RULES:
-1. Ask ONE question at a time and wait for the user's response
-2. Be dynamic - if the user says "no" to a deduction, move to the next relevant question
-3. If the user says "none" or "no expenses", skip that category and move on
-4. If the user provides multiple amounts for the same category, ask for clarification
-5. You can conclude early if the user indicates they have no more deductions
-6. Be conversational and helpful
-7. After gathering all relevant information, provide a summary
-8. Use the available tools to calculate tax refunds and check deductions
+    const agent = await createOpenAIFunctionsAgent({
+      llm: this.langchainLLM,
+      tools,
+      prompt
+    });
 
-Chat History:
-{chat_history}
-
-Human: {input}
-AI Assistant: {agent_scratchpad}`);
-
-      const agent = await createOpenAIFunctionsAgent({
-        llm: this.langchainLLM,
-        tools,
-        prompt,
-      });
-
-      this.agentExecutor = new AgentExecutor({
-        agent,
-        tools,
-        memory: this.memory,
-        verbose: false,
-      });
-
-    } catch (error) {
-      console.error('Failed to initialize LangChain agent:', error);
-      throw error;
-    }
+    this.agentExecutor = new AgentExecutor({
+      agent,
+      tools,
+      verbose: true
+    });
   }
 
   private buildInitialSummary(): string {
-    const { full_name, address, employer, total_hours, gross_income, income_tax_paid, year } = this.state.extractedData;
+    if (!this.state.extractedData) {
+      return "No data available to summarize.";
+    }
+    
+    const { full_name, employer, total_hours, gross_income, income_tax_paid, year } = this.state.extractedData;
 
     return `Here's what I found from your documents:
 
@@ -459,8 +352,10 @@ AI Assistant: {agent_scratchpad}`);
   }
 
   private isBelowThreshold(): boolean {
-    const year = this.state.userData.year;
-    const grossIncome = this.state.userData.gross_income || 0;
+    if (!this.state.extractedData) return false;
+    
+    const year = this.state.extractedData.year;
+    const grossIncome = this.state.extractedData.gross_income || 0;
     
     if (!year) return false;
     
@@ -469,10 +364,14 @@ AI Assistant: {agent_scratchpad}`);
   }
 
   private earlyExitSummary(): string {
-    const { year, gross_income, income_tax_paid } = this.state.userData;
+    if (!this.state.extractedData) {
+      return "No data available for summary.";
+    }
+    
+    const { year, gross_income, income_tax_paid, full_name, employer } = this.state.extractedData;
     const threshold = year ? TaxAdvisor.TAX_FREE_THRESHOLDS[year] : 0;
     
-    let result = `# 📊 **Tax Filing Summary for ${this.state.extractedData.full_name || "User"}**\n\n`;
+    let result = `# 📊 **Tax Filing Summary for ${full_name || "User"}**\n\n`;
     result += `## 💰 **Financial Overview**\n`;
     result += `- **Tax Year:** ${year}\n`;
     result += `- **Gross Income:** €${Number(gross_income || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n`;
@@ -488,14 +387,14 @@ AI Assistant: {agent_scratchpad}`);
     
     result += `## 📄 **Complete Filing Data (JSON)**\n`;
     const jsonSummary = {
-      name: this.state.extractedData.full_name || "User",
+      name: full_name || "User",
       tax_year: year,
       gross_income: Number(gross_income || 0),
       tax_paid: Number(income_tax_paid || 0),
       tax_free_threshold: threshold,
       status: "below_threshold",
       estimated_refund: Number(income_tax_paid || 0),
-      employer: this.state.extractedData.employer || "Not specified",
+      employer: employer || "Not specified",
       filing_date: new Date().toISOString().split('T')[0],
       deductions: {},
       total_deductions: 0,
@@ -542,201 +441,62 @@ AI Assistant: {agent_scratchpad}`);
       };
     }
     
-    // Check for "yes" responses (use max amount)
-    const isYes = /^(yes|y|ja|j|true|1)$/i.test(cleanAnswer);
-    if (isYes) {
-      const maxAmount = currentQuestion.maxAmount || 0;
-      console.log(`Detected YES response for ${currentQuestion.category}, using max amount: ${maxAmount}`);
-      return {
-        questionId: currentQuestion.id,
-        answer: true,
-        amount: maxAmount,
-        details: `Claimed maximum €${maxAmount.toFixed(2)} for ${currentQuestion.category}`
-      };
-    }
+    // Extract numeric amounts from complex responses
+    let amount = 0;
+    let details = answer;
     
-    // Enhanced parsing for complex input formats
-    let totalAmount = 0;
-    let details = '';
-    
-    // 1. Extract all numbers from the input
-    const numberMatches = cleanAnswer.match(/\d+(?:[.,]\d{1,3})*/g);
-    console.log(`Found number matches:`, numberMatches);
-    
-    if (numberMatches && numberMatches.length > 0) {
-      // Convert all found numbers to amounts
-      const amounts = numberMatches.map(num => {
-        const cleanNum = num.replace(/,/g, '');
-        return parseFloat(cleanNum);
-      }).filter(amount => !isNaN(amount) && amount > 0);
-      
-      console.log(`Parsed amounts:`, amounts);
-      
-      if (amounts.length > 0) {
-        totalAmount = amounts.reduce((sum, amount) => sum + amount, 0);
-        
-        // Create detailed description
-        if (amounts.length === 1) {
-          details = `Claimed €${amounts[0].toFixed(2)} for ${currentQuestion.category}`;
-        } else {
-          const amountDetails = amounts.map(amount => `€${amount.toFixed(2)}`).join(', ');
-          details = `Claimed total €${totalAmount.toFixed(2)} for ${currentQuestion.category} (${amountDetails})`;
-        }
-        
-        const maxAmount = currentQuestion.maxAmount || 0;
-        console.log(`Total amount: ${totalAmount}, Max allowed: ${maxAmount}`);
-        
-        // Accept the amount but cap it at maximum if it exceeds
-        if (totalAmount > 0) {
-          const finalAmount = Math.min(totalAmount, maxAmount);
-          const finalDetails = totalAmount > maxAmount 
-            ? `Claimed €${finalAmount.toFixed(2)} for ${currentQuestion.category} (capped from €${totalAmount.toFixed(2)})`
-            : details;
-          
-          console.log(`✅ Valid deduction: ${finalDetails}`);
-          return {
-            questionId: currentQuestion.id,
-            answer: true,
-            amount: finalAmount,
-            details: finalDetails
-          };
-        }
+    // Handle complex responses like "1040 for laptop, and 95 for study material"
+    const amountMatches = answer.match(/(\d+(?:[.,]\d+)?)\s*(?:euro|eur|€|for|on|spent|cost|paid)?\s*([^,]+)/gi);
+    if (amountMatches && amountMatches.length > 0) {
+      // Take the first amount found
+      const firstMatch = amountMatches[0];
+      const numMatch = firstMatch.match(/(\d+(?:[.,]\d+)?)/);
+      if (numMatch) {
+        amount = parseFloat(numMatch[1].replace(',', '.'));
+        details = answer;
+      }
+    } else {
+      // Handle simple numeric responses
+      const numericMatch = answer.match(/(\d+(?:[.,]\d+)?)/);
+      if (numericMatch) {
+        amount = parseFloat(numericMatch[1].replace(',', '.'));
+        details = answer;
       }
     }
     
-    // 2. Handle distance and days format: "18km, 210 days", "18 km 210 days"
-    const distanceDaysMatch = cleanAnswer.match(/(\d+)\s*(?:km|kilometer).*?(\d+)\s*(?:days|day|tage)/i);
-    if (distanceDaysMatch) {
-      const distance = parseInt(distanceDaysMatch[1]);
-      const days = parseInt(distanceDaysMatch[2]);
-      
-      // Calculate commuting cost: distance * days * 0.30€ per km
-      const amount = distance * days * 0.30;
-      const maxAmount = currentQuestion.maxAmount || 0;
-      
-      console.log(`Distance/days calculation: ${distance}km × ${days} days × €0.30 = €${amount}`);
-      
-      if (amount > 0) {
-        const finalAmount = Math.min(amount, maxAmount);
-        const finalDetails = amount > maxAmount 
-          ? `Claimed €${finalAmount.toFixed(2)} for ${currentQuestion.category} (capped from €${amount.toFixed(2)})`
-          : `Claimed €${amount.toFixed(2)} for ${currentQuestion.category} (${distance}km × ${days} days × €0.30/km)`;
-        
-        return {
-          questionId: currentQuestion.id,
-          answer: true,
-          amount: finalAmount,
-          details: finalDetails
-        };
+    // Handle special cases like "18km, 210 days" for commuting
+    if (currentQuestion.category === 'Travel' && answer.includes('km') && answer.includes('days')) {
+      const kmMatch = answer.match(/(\d+)\s*km/i);
+      const daysMatch = answer.match(/(\d+)\s*days?/i);
+      if (kmMatch && daysMatch) {
+        const km = parseInt(kmMatch[1]);
+        const days = parseInt(daysMatch[1]);
+        amount = km * days * 0.30; // €0.30 per km per day
+        details = `${km}km, ${days} days commuting`;
       }
     }
     
-    // 3. Just distance: "18km", "18 km"
-    const distanceMatch = cleanAnswer.match(/(\d+)\s*(?:km|kilometer)/i);
-    if (distanceMatch) {
-      const distance = parseInt(distanceMatch[1]);
-      // Assume 220 working days per year
-      const amount = distance * 220 * 0.30;
-      const maxAmount = currentQuestion.maxAmount || 0;
-      
-      console.log(`Distance calculation: ${distance}km × 220 days × €0.30 = €${amount}`);
-      
-      if (amount > 0) {
-        const finalAmount = Math.min(amount, maxAmount);
-        const finalDetails = amount > maxAmount 
-          ? `Claimed €${finalAmount.toFixed(2)} for ${currentQuestion.category} (capped from €${amount.toFixed(2)})`
-          : `Claimed €${amount.toFixed(2)} for ${currentQuestion.category} (${distance}km × 220 days × €0.30/km)`;
-        
-        return {
-          questionId: currentQuestion.id,
-          answer: true,
-          amount: finalAmount,
-          details: finalDetails
-        };
-      }
+    // Cap the amount at the maximum allowed
+    const maxAmount = currentQuestion.maxAmount || 0;
+    if (amount > maxAmount) {
+      console.log(`Capping amount from ${amount} to ${maxAmount} for ${currentQuestion.category}`);
+      amount = maxAmount;
     }
     
-    // 4. Just days: "210 days", "210 day"
-    const daysMatch = cleanAnswer.match(/(\d+)\s*(?:days|day|tage)/i);
-    if (daysMatch) {
-      const days = parseInt(daysMatch[1]);
-      // Assume 10km average distance
-      const amount = 10 * days * 0.30;
-      const maxAmount = currentQuestion.maxAmount || 0;
-      
-      console.log(`Days calculation: 10km × ${days} days × €0.30 = €${amount}`);
-      
-      if (amount > 0) {
-        const finalAmount = Math.min(amount, maxAmount);
-        const finalDetails = amount > maxAmount 
-          ? `Claimed €${finalAmount.toFixed(2)} for ${currentQuestion.category} (capped from €${amount.toFixed(2)})`
-          : `Claimed €${amount.toFixed(2)} for ${currentQuestion.category} (10km × ${days} days × €0.30/km)`;
-        
-        return {
-          questionId: currentQuestion.id,
-          answer: true,
-          amount: finalAmount,
-          details: finalDetails
-        };
-      }
-    }
+    console.log(`Final deduction: ${currentQuestion.category} - €${amount} - ${details}`);
     
-    // 5. Amount with currency: "€18210", "18210€", "18210 euro"
-    const currencyMatch = cleanAnswer.match(/[€$]?\s*(\d+(?:[.,]\d{1,3})*)\s*[€$]?\s*(?:euro|eur)?/i);
-    if (currencyMatch) {
-      const cleanNumber = currencyMatch[1].replace(/,/g, '');
-      const amount = parseFloat(cleanNumber);
-      const maxAmount = currentQuestion.maxAmount || 0;
-      
-      console.log(`Currency match: ${amount}`);
-      
-      if (amount > 0) {
-        const finalAmount = Math.min(amount, maxAmount);
-        const finalDetails = amount > maxAmount 
-          ? `Claimed €${finalAmount.toFixed(2)} for ${currentQuestion.category} (capped from €${amount.toFixed(2)})`
-          : `Claimed €${amount.toFixed(2)} for ${currentQuestion.category}`;
-        
-        return {
-          questionId: currentQuestion.id,
-          answer: true,
-          amount: finalAmount,
-          details: finalDetails
-        };
-      }
-    }
-    
-    // 6. Simple numbers: "18210", "18.210", "18,210"
-    const numericMatch = cleanAnswer.match(/^(\d+(?:[.,]\d{1,3})*)$/);
-    if (numericMatch) {
-      // Remove commas and convert to number
-      const cleanNumber = numericMatch[1].replace(/,/g, '');
-      const amount = parseFloat(cleanNumber);
-      const maxAmount = currentQuestion.maxAmount || 0;
-      
-      console.log(`Simple number match: ${amount}`);
-      
-      if (amount > 0) {
-        const finalAmount = Math.min(amount, maxAmount);
-        const finalDetails = amount > maxAmount 
-          ? `Claimed €${finalAmount.toFixed(2)} for ${currentQuestion.category} (capped from €${amount.toFixed(2)})`
-          : `Claimed €${amount.toFixed(2)} for ${currentQuestion.category}`;
-        
-        return {
-          questionId: currentQuestion.id,
-          answer: true,
-          amount: finalAmount,
-          details: finalDetails
-        };
-      }
-    }
-    
-    console.log(`❌ No valid deduction found for: "${cleanAnswer}"`);
-    return null;
+    return {
+      questionId: currentQuestion.id,
+      answer: amount > 0,
+      amount: amount,
+      details: details
+    };
   }
 
   private addDynamicDeduction(category: string, amount: number, details: string): void {
-    this.state.deductionAnswers[category] = {
-      questionId: category,
+    const deductionId = `dynamic_${category.toLowerCase().replace(/\s+/g, '_')}`;
+    this.state.deductionAnswers[deductionId] = {
+      questionId: deductionId,
       answer: true,
       amount: amount,
       details: details
@@ -748,9 +508,18 @@ AI Assistant: {agent_scratchpad}`);
       .filter(a => a.answer)
       .reduce((sum, a) => sum + (a.amount || 0), 0);
 
-    const grossIncome = this.state.userData.gross_income || 0;
+    if (!this.state.extractedData) {
+      return {
+        totalDeductions: 0,
+        deductions: [],
+        taxableIncome: 0,
+        refund: 0
+      };
+    }
+
+    const grossIncome = this.state.extractedData.gross_income || 0;
     const taxableIncome = Math.max(0, grossIncome - totalDeductions);
-    const taxPaid = this.state.userData.income_tax_paid || 0;
+    const taxPaid = this.state.extractedData.income_tax_paid || 0;
     
     // Simple tax calculation (in reality this would be more complex)
     const estimatedTax = taxableIncome * 0.15;
@@ -776,11 +545,14 @@ AI Assistant: {agent_scratchpad}`);
   }
 
   private generateFinalSummary(): string {
-    const summary = this.calculateTaxSummary();
-    const { year, gross_income, income_tax_paid } = this.state.userData;
-    const status = this.state.userData.status;
+    if (!this.state.extractedData) {
+      return "No data available for summary.";
+    }
 
-    let result = `# 📊 **Tax Filing Summary for ${this.state.extractedData.full_name || "User"}**\n\n`;
+    const summary = this.calculateTaxSummary();
+    const { year, gross_income, income_tax_paid, full_name, employer } = this.state.extractedData;
+
+    let result = `# 📊 **Tax Filing Summary for ${full_name || "User"}**\n\n`;
     result += `## 💰 **Financial Overview**\n`;
     result += `- **Tax Year:** ${year}\n`;
     result += `- **Gross Income:** €${Number(gross_income || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n`;
@@ -815,8 +587,7 @@ AI Assistant: {agent_scratchpad}`);
       });
 
     const jsonSummary = {
-      name: this.state.extractedData.full_name || "User",
-      status: status,
+      name: full_name || "User",
       tax_year: year,
       gross_income: Number(gross_income || 0),
       tax_paid: Number(income_tax_paid || 0),
@@ -824,7 +595,7 @@ AI Assistant: {agent_scratchpad}`);
       total_deductions: summary.totalDeductions,
       taxable_income: summary.taxableIncome,
       estimated_refund: summary.refund,
-      employer: this.state.extractedData.employer || "Not specified",
+      employer: employer || "Not specified",
       filing_date: new Date().toISOString().split('T')[0]
     };
 
@@ -844,16 +615,16 @@ AI Assistant: {agent_scratchpad}`);
   }
 
   async nextAdvisorMessage(): Promise<string> {
-    const lastUserMessage = this.state.conversationHistory.slice().reverse().find(msg => msg.role === 'user')?.content.toLowerCase();
-    const lastAgentMessage = this.state.conversationHistory.slice().reverse().find(msg => msg.role === 'assistant')?.content.toLowerCase();
+    const lastUserMessage = this.state.messages.slice().reverse().find(msg => msg.sender === 'user')?.text.toLowerCase();
+    const lastAgentMessage = this.state.messages.slice().reverse().find(msg => msg.sender === 'assistant')?.text.toLowerCase();
 
     try {
       // Initial message: Display summary and confirm year
-      if (this.state.conversationHistory.length === 0) {
+      if (this.state.messages.length === 0) {
         const summary = this.buildInitialSummary();
         this.addAgentMessage(summary);
 
-        const year = this.state.extractedData.year;
+        const year = this.state.extractedData?.year;
         if (year) {
           const confirmMsg = `Can you please confirm that the tax year you want to file is ${year}? (yes/no)
 
@@ -868,9 +639,14 @@ If this is correct, I'll help you with your tax filing process. If not, please u
       // Handle year confirmation
       if (lastAgentMessage && lastAgentMessage.includes('confirm that the tax year')) {
         if (lastUserMessage && /^(yes|y|yeah|correct|right)$/i.test(lastUserMessage)) {
-          const year = this.state.userData.year;
+          const year = this.state.extractedData?.year;
           if (year) {
-            this.state.filedYears.add(year);
+            // Add to filed summaries
+            this.state.filedSummaries.push({
+              year: year.toString(),
+              summary: { taxableIncome: 0, refund: 0 },
+              deductions: {}
+            });
           }
           
           // Check threshold after year confirmation
@@ -878,6 +654,7 @@ If this is correct, I'll help you with your tax filing process. If not, please u
             const summary = this.earlyExitSummary();
             const finalMsg = `${summary}\n\nWould you like to file a tax return for another year?`;
             this.addAgentMessage(finalMsg);
+            this.state.done = true;
             return finalMsg;
           }
           
@@ -919,7 +696,6 @@ Please select your status for the year:
         }
         
         if (status) {
-          this.state.userData.status = status;
           this.state.deductionFlow = this.deductionFlowMap[status];
           this.state.currentQuestionIndex = 0;
           
@@ -942,119 +718,93 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
       
       // Handle "file for another year" response
       if (lastAgentMessage && lastAgentMessage.includes('file a tax return for another year')) {
-        if (lastUserMessage && /^(yes|y|yeah|correct|right)$/i.test(lastUserMessage)) {
-          // Reset for new year while preserving helpful information
+        if (lastUserMessage && /^(yes|y|yeah|sure|ok)$/i.test(lastUserMessage)) {
           this.resetForNewYear();
-          
-          const result = "🎯 **Ready for another year!**\n\nI've reset the conversation for your new tax filing. Please upload the PDF for the year you want to file next.\n\n💡 **Helpful Info:** I remember you've filed for: " + 
-            (this.state.filedYears.size > 0 ? Array.from(this.state.filedYears).sort().join(", ") : "no previous years") + 
-            ". This helps me provide better advice for your new filing.";
-          
+          const result = "Great! Please upload the PDF for the new year you want to file.";
           return result;
         } else {
-          const result = "Thank you for using STX Advisor. Have a great day!";
+          const result = "Thank you for using our tax advisor! Your filing is complete.";
+          this.state.done = true;
           return result;
         }
       }
-
-      // Dynamic deduction flow - use proper deduction flow logic
-      if (this.state.deductionFlow && this.state.currentQuestionIndex < this.state.deductionFlow.questions.length) {
-        const currentQuestion = this.state.deductionFlow.questions[this.state.currentQuestionIndex];
+      
+      // Handle deduction questions
+      const currentQuestion = this.getCurrentQuestion();
+      if (currentQuestion && lastAgentMessage && lastAgentMessage.includes(currentQuestion.question)) {
+        const deductionAnswer = this.processDeductionAnswer(lastUserMessage || '');
         
-        // Process the user's answer to the current question
-        const answer = this.processDeductionAnswer(lastUserMessage || '');
-        if (answer !== null) {
-          // Store the answer
-          this.state.deductionAnswers[currentQuestion.id] = answer;
+        if (deductionAnswer) {
+          this.state.deductionAnswers[deductionAnswer.questionId] = deductionAnswer;
           this.state.currentQuestionIndex++;
           
-          // Check if we have more questions
-          if (this.state.currentQuestionIndex < this.state.deductionFlow.questions.length) {
-            const nextQuestion = this.state.deductionFlow.questions[this.state.currentQuestionIndex];
-            const nextQuestionMsg = `Thank you! Your ${currentQuestion.category} deduction: €${(answer.amount || 0).toFixed(2)}
+          const nextQuestion = this.getCurrentQuestion();
+          if (nextQuestion) {
+            const nextMsg = `**${nextQuestion.question}**
 
-Next question:
+Please provide the amount or type "n/a" if this doesn't apply to you.`;
+            this.addAgentMessage(nextMsg);
+            return nextMsg;
+          } else {
+            // All questions answered, generate final summary
+            const summary = this.generateFinalSummary();
+            const finalMsg = `${summary}\n\nWould you like to file a tax return for another year?`;
+            this.addAgentMessage(finalMsg);
+            this.state.done = true;
+            return finalMsg;
+          }
+        } else {
+          const result = "I couldn't understand your response. Please provide a specific amount (e.g., '500') or type 'n/a' if this doesn't apply to you.";
+          return result;
+        }
+      }
+      
+      // Handle complex responses with multiple amounts
+      if (lastUserMessage && lastUserMessage.includes('for') && /\d+/.test(lastUserMessage)) {
+        const deductionAnswer = this.processDeductionAnswer(lastUserMessage);
+        if (deductionAnswer && deductionAnswer.answer) {
+          this.state.deductionAnswers[deductionAnswer.questionId] = deductionAnswer;
+          this.state.currentQuestionIndex++;
+          
+          const nextQuestion = this.getCurrentQuestion();
+          if (nextQuestion) {
+            const nextMsg = `Great! I've recorded €${deductionAnswer.amount} for ${deductionAnswer.details}.
 
 **${nextQuestion.question}**
 
 Please provide the amount or type "n/a" if this doesn't apply to you.`;
-            
-            this.addAgentMessage(nextQuestionMsg);
-            return nextQuestionMsg;
+            this.addAgentMessage(nextMsg);
+            return nextMsg;
           } else {
-            // All questions answered, generate final summary
-            const finalSummary = this.generateFinalSummary();
-            this.addAgentMessage(finalSummary);
+            const summary = this.generateFinalSummary();
+            const finalMsg = `${summary}\n\nWould you like to file a tax return for another year?`;
+            this.addAgentMessage(finalMsg);
             this.state.done = true;
-            return finalSummary;
+            return finalMsg;
           }
-        } else {
-          // Invalid answer, ask the same question again
-          const retryMsg = `I didn't understand your response. Please provide a specific amount for ${currentQuestion.category} or type "n/a" if this doesn't apply to you.
-
-**${currentQuestion.question}**
-
-Please provide the amount or type "n/a" if this doesn't apply to you.`;
-          
-          this.addAgentMessage(retryMsg);
-          return retryMsg;
         }
       }
       
-      // If we reach here, use fallback for general conversation
+      // Fallback: Use LangChain agent for complex queries
       try {
-        await this.initializeAgent();
-        
         if (!this.agentExecutor) {
-          throw new Error('Agent not initialized');
+          await this.initializeAgent();
         }
-
-        const filedYears = Array.from(this.state.filedYears).sort();
-        const filedYearsStr = filedYears.length > 0 ? `User has already filed for: ${filedYears.join(", ")}.` : "User has not filed for any year yet.";
         
-        const currentStatus = this.state.userData.status;
-        const currentFlow = this.state.deductionFlow;
-        const currentQuestionIndex = this.state.currentQuestionIndex;
+        const context = {
+          extractedData: this.state.extractedData,
+          deductionAnswers: this.state.deductionAnswers,
+          currentQuestion: this.getCurrentQuestion(),
+          filedSummaries: this.state.filedSummaries,
+          lastUserMessage: lastUserMessage || '',
+          lastAgentMessage: lastAgentMessage || ''
+        };
         
-        const systemPrompt = `You are a professional German tax advisor. You help users with their tax returns and provide accurate, helpful advice.
-
-Current user data:
-- Year: ${this.state.userData.year || 'unknown'}
-- Gross Income: €${this.state.userData.gross_income || 0}
-- Tax Paid: €${this.state.userData.income_tax_paid || 0}
-- Status: ${currentStatus || 'unknown'}
-- ${filedYearsStr}
-
-IMPORTANT RULES:
-1. Ask ONE question at a time and wait for the user's response
-2. Be dynamic - if the user says "no" to a deduction, move to the next relevant question
-3. If the user says "none" or "no expenses", skip that category and move on
-4. If the user provides multiple amounts for the same category, ask for clarification
-5. You can conclude early if the user indicates they have no more deductions
-6. Be conversational and helpful
-7. After gathering all relevant information, provide a summary
-
-Current deduction flow: ${currentFlow ? currentFlow.status : 'none'}
-Current question index: ${currentQuestionIndex}
-
-User's last message: ${lastUserMessage || 'none'}
-
-Provide a helpful response that guides the user through their tax filing process.`;
-
-        const response = await this.openai.chat.completions.create({
-          model: 'gpt-4o',
-          messages: [
-            { role: 'system', content: systemPrompt },
-            ...this.state.conversationHistory.map(msg => ({
-              role: msg.role as 'user' | 'assistant',
-              content: msg.content
-            }))
-          ],
-          temperature: 0.7,
-          max_tokens: 500
+        const response = await this.agentExecutor!.invoke({ 
+          input: lastUserMessage || '' 
         });
-
-        const reply = response.choices[0]?.message?.content || 'I apologize, but I need more information to help you properly. Could you please provide more details about your tax situation?';
+        
+        const reply = response.output || 'I apologize, but I need more information to help you properly. Could you please provide more details about your tax situation?';
         
         // Check if the reply indicates a summary or conclusion
         if (reply.toLowerCase().includes('summary') || reply.toLowerCase().includes('conclusion') || reply.toLowerCase().includes('final')) {
@@ -1077,15 +827,27 @@ Provide a helpful response that guides the user through their tax filing process
   }
 
   getConversationHistory(): ConversationHistory[] {
-    return this.state.conversationHistory;
+    return this.state.messages.map(msg => ({
+      role: msg.sender === 'user' ? 'user' : 'assistant',
+      content: msg.text
+    }));
   }
 
   getUserData(): UserData {
-    return this.state.userData;
+    if (!this.state.extractedData) {
+      return {};
+    }
+    return {
+      year: this.state.extractedData.year,
+      gross_income: this.state.extractedData.gross_income,
+      income_tax_paid: this.state.extractedData.income_tax_paid,
+      employer: this.state.extractedData.employer,
+      full_name: this.state.extractedData.full_name
+    };
   }
 
   getFiledYears(): Set<number> {
-    return this.state.filedYears;
+    return new Set(this.state.filedSummaries.map(summary => parseInt(summary.year)));
   }
 
   getDeductionAnswers(): DeductionAnswer[] {
@@ -1095,14 +857,17 @@ Provide a helpful response that guides the user through their tax filing process
   getTaxCalculation(): TaxCalculation | null {
     if (!this.state.taxCalculation) {
       const summary = this.calculateTaxSummary();
+      if (!this.state.extractedData) {
+        return null;
+      }
       this.state.taxCalculation = {
-        grossIncome: this.state.userData.gross_income || 0,
+        grossIncome: this.state.extractedData.gross_income || 0,
         totalDeductions: summary.totalDeductions,
         taxableIncome: summary.taxableIncome,
         estimatedTax: summary.taxableIncome * 0.15,
-        taxPaid: this.state.userData.income_tax_paid || 0,
+        taxPaid: this.state.extractedData.income_tax_paid || 0,
         refund: summary.refund,
-        year: this.state.userData.year || 0
+        year: this.state.extractedData.year || 0
       };
     }
     return this.state.taxCalculation;
@@ -1110,15 +875,16 @@ Provide a helpful response that guides the user through their tax filing process
 
   reset(): void {
     this.state = {
-      conversationHistory: [],
-      extractedData: {},
-      userData: {},
-      askedQuestions: new Set(),
-      filedYears: this.state.filedYears, // Keep filedYears across resets
+      messages: [],
+      loading: false,
+      step: 'upload',
+      extractedData: null,
+      multiPDFData: null,
+      filedSummaries: this.state.filedSummaries, // Keep filedSummaries across resets
       deductionAnswers: {},
       currentQuestionIndex: 0,
-      deductionFlow: undefined,
-      taxCalculation: undefined,
+      deductionFlow: null,
+      taxCalculation: null,
       done: false
     };
     
@@ -1129,18 +895,19 @@ Provide a helpful response that guides the user through their tax filing process
 
   private resetForNewYear(): void {
     // Preserve filed years but clear current year data
-    const preservedFiledYears = new Set(this.state.filedYears);
+    const preservedFiledSummaries = [...this.state.filedSummaries];
     
     this.state = {
-      conversationHistory: [],
-      extractedData: {},
-      userData: {},
-      askedQuestions: new Set(),
-      filedYears: preservedFiledYears, // Keep filedYears across resets
+      messages: [],
+      loading: false,
+      step: 'upload',
+      extractedData: null,
+      multiPDFData: null,
+      filedSummaries: preservedFiledSummaries, // Keep filedSummaries across resets
       deductionAnswers: {},
       currentQuestionIndex: 0,
-      deductionFlow: undefined,
-      taxCalculation: undefined,
+      deductionFlow: null,
+      taxCalculation: null,
       done: false
     };
     
