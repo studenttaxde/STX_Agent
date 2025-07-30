@@ -4,7 +4,7 @@
 
 [build.environment]
   NODE_VERSION = "18"
-  BACKEND_URL = "https://pdf-extractor-service.onrender.com"
+  BACKEND_URL = "https://stx-agent.onrender.com"
   LANGCHAIN_API_KEY = "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"
   LANGCHAIN_PROJECT = "STX_Advisor"
   LANGCHAIN_ENDPOINT = "https://api.smith.langchain.com"
@@ -14,7 +14,7 @@
 
 [[redirects]]
   from = "/*"
-  to = "/index.html"
+  to = "/"
   status = 200
 
 [[headers]]
