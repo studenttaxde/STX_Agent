@@ -106,11 +106,22 @@ export interface TaxSummary {
   }>;
 }
 
+// MultiPDFData interface for the frontend
+export interface MultiPDFData {
+  totalFiles: number;
+  results: any[];
+  summary: {
+    year: string | number;
+    grossIncome: number;
+    incomeTaxPaid: number;
+    employer: string;
+    fullName: string;
+  };
+}
+
 export interface Message {
-  id: string;
-  sender: 'user' | 'agent';
+  sender: 'user' | 'assistant';
   text: string;
-  timestamp: Date;
 }
 
 export interface ConversationState {
@@ -177,17 +188,27 @@ export interface ConversationHistory {
   content: string;
 }
 
+export interface FiledSummary {
+  year: string;
+  summary: {
+    taxableIncome?: number;
+    refund?: number;
+  };
+  deductions: Record<string, DeductionAnswer>;
+}
+
 export interface TaxAdvisorState {
-  conversationHistory: ConversationHistory[];
-  extractedData: ExtractedData;
-  userData: UserData;
-  askedQuestions: Set<string>;
-  filedYears: Set<number>;
+  messages: Message[];
+  loading: boolean;
+  step: 'upload' | 'advisor' | 'done';
+  extractedData: ExtractedData | null;
+  multiPDFData: MultiPDFData | null;
+  filedSummaries: FiledSummary[];
   deductionAnswers: Record<string, DeductionAnswer>;
   currentQuestionIndex: number;
-  deductionFlow?: DeductionFlow;
-  taxCalculation?: TaxCalculation;
-  done?: boolean;
+  deductionFlow: DeductionFlow | null;
+  taxCalculation: TaxCalculation | null;
+  done: boolean;
 }
 
 // File upload progress tracking

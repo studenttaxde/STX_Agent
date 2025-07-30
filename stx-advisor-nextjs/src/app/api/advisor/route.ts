@@ -19,7 +19,7 @@ function getOrCreateAdvisor(sessionId: string): TaxAdvisor {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { action, sessionId, extractedData, userMessage, answers } = body;
+    const { action, sessionId, extractedData, message, existingData, suggestedDeductions } = body;
 
     if (!sessionId) {
       return NextResponse.json({ error: 'Session ID required' }, { status: 400 });
@@ -32,25 +32,30 @@ export async function POST(request: NextRequest) {
         if (extractedData) {
           advisor.setExtractedData(extractedData as ExtractedData);
         }
+        
+        // If there's existing data, inform the advisor
+        if (existingData) {
+          advisor.addUserMessage(`I have existing data for ${existingData.year}: Income: €${existingData.gross_income}, Tax Paid: €${existingData.income_tax_paid}, Employer: ${existingData.employer}`);
+        }
+        
+        // If there are suggested deductions, inform the advisor
+        if (suggestedDeductions && suggestedDeductions.length > 0) {
+          const deductionSuggestions = suggestedDeductions.map((d: any) => `${d.category}: €${d.amount}`).join(', ');
+          advisor.addUserMessage(`Based on previous years, you commonly claimed: ${deductionSuggestions}`);
+        }
+        
         const initialMessage = await advisor.nextAdvisorMessage();
         return NextResponse.json({
           success: true,
-          advisor_message: initialMessage,
+          message: initialMessage,
           done: false,
           deduction_flow: null,
           current_question_index: 0
         });
 
       case 'respond':
-        if (userMessage) {
-          advisor.addUserMessage(userMessage);
-        }
-        
-        // Process answers if provided
-        if (answers) {
-          Object.entries(answers).forEach(([, answer]) => {
-            advisor.addUserMessage(answer as string);
-          });
+        if (message) {
+          advisor.addUserMessage(message);
         }
 
         const nextMessage = await advisor.nextAdvisorMessage();
@@ -80,18 +85,17 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
           success: true,
-          advisor_message: nextMessage,
+          message: nextMessage,
           done: isDone,
-          conversation_history: advisor.getConversationHistory(),
-          user_data: userData,
-          filed_years: Array.from(advisor.getFiledYears()),
           deduction_answers: deductionAnswers,
           tax_calculation: taxCalculation,
           deduction_flow: userData.status ? {
             status: userData.status,
             current_question_index: deductionAnswers.length,
             total_questions: deductionAnswers.length + (isDone ? 0 : 1)
-          } : null
+          } : null,
+          current_question_index: deductionAnswers.length,
+          total_questions: deductionAnswers.length + (isDone ? 0 : 1)
         });
 
       case 'reset':
@@ -108,16 +112,15 @@ export async function POST(request: NextRequest) {
         
         return NextResponse.json({
           success: true,
-          conversation_history: advisor.getConversationHistory(),
-          user_data: userDataState,
-          filed_years: Array.from(advisor.getFiledYears()),
           deduction_answers: deductionAnswersState,
           tax_calculation: taxCalculationState,
           deduction_flow: userDataState.status ? {
             status: userDataState.status,
             current_question_index: deductionAnswersState.length,
             total_questions: deductionAnswersState.length
-          } : null
+          } : null,
+          current_question_index: deductionAnswersState.length,
+          total_questions: deductionAnswersState.length
         });
 
       default:
