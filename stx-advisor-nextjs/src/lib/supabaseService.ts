@@ -130,12 +130,12 @@ export const getTaxFilingByYear = async (year: number): Promise<TaxFiling | null
       .eq('year', year)
       .single()
     
-    if (error) {
+    if (error && error.code !== 'PGRST116') { // PGRST116 is "not found"
       console.error('Error fetching tax filing by year:', error)
       return null
     }
     
-    return data
+    return data || null
   } catch (error) {
     console.error('Error in getTaxFilingByYear:', error)
     return null
@@ -226,23 +226,38 @@ export const updateUserProfile = async (updates: Partial<UserProfile>): Promise<
 
 // Check if user has existing data for a year
 export const hasExistingData = async (year: number): Promise<boolean> => {
-  const filing = await getTaxFilingByYear(year)
-  return filing !== null
+  const userId = generateUserId()
+  
+  try {
+    const { data, error } = await supabase
+      .from('tax_filings')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('year', year)
+      .single()
+    
+    if (error && error.code !== 'PGRST116') { // PGRST116 is "not found"
+      console.error('Error checking existing data:', error)
+      return false
+    }
+    
+    return !!data
+  } catch (error) {
+    console.error('Error in hasExistingData:', error)
+    return false
+  }
 }
 
-// Get suggested deductions based on previous years
+// Get suggested deductions for a year
 export const getSuggestedDeductions = async (year: number): Promise<UserDeduction[]> => {
   const userId = generateUserId()
   
   try {
-    // Get deductions from previous years to suggest common ones
     const { data, error } = await supabase
       .from('user_deductions')
       .select('*')
       .eq('user_id', userId)
-      .neq('year', year) // Exclude current year
-      .order('created_at', { ascending: false })
-      .limit(10)
+      .eq('year', year)
     
     if (error) {
       console.error('Error fetching suggested deductions:', error)

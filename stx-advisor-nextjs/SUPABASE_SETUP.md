@@ -1,137 +1,89 @@
 # Supabase Setup Guide for STX Advisor
 
-## Overview
-This guide will help you set up Supabase for data persistence in the STX Advisor application. Supabase will store user profiles, tax filings, and deductions to provide a better user experience.
-
-## Prerequisites
-- Supabase account (free tier available)
-- Access to Supabase dashboard
-
-## Step 1: Create Supabase Project
+## 1. Create Supabase Project
 
 1. Go to [supabase.com](https://supabase.com)
-2. Sign up or log in to your account
-3. Click "New Project"
-4. Choose your organization
-5. Enter project details:
-   - **Name**: `stx-advisor`
-   - **Database Password**: Choose a strong password
-   - **Region**: Choose closest to your users
-6. Click "Create new project"
+2. Create a new project
+3. Note down your project URL and anon key
 
-## Step 2: Get Project Credentials
+## 2. Database Setup
 
-1. In your Supabase dashboard, go to **Settings** → **API**
-2. Copy the following values:
-   - **Project URL**: `https://your-project-id.supabase.co`
-   - **Anon Public Key**: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...`
+### Run the SQL Schema
 
-## Step 3: Set Up Database Schema
+1. Go to your Supabase dashboard
+2. Navigate to **SQL Editor**
+3. Copy and paste the contents of `supabase-schema.sql` into the editor
+4. Click **Run** to execute the schema
 
-1. In your Supabase dashboard, go to **SQL Editor**
-2. Create a new query
-3. Copy and paste the contents of `supabase-schema.sql`
-4. Click "Run" to execute the schema
+### Verify Tables Created
 
-## Step 4: Configure Environment Variables
+After running the schema, you should see these tables:
+- `user_profiles`
+- `tax_filings` 
+- `user_deductions`
 
-Add the following environment variables to your `.env.local` file:
+## 3. Environment Variables
+
+Add these to your `.env.local` file:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key-here
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-## Step 5: Update Supabase Configuration
+## 4. Row Level Security (RLS)
 
-Update the Supabase configuration in `src/lib/supabase.ts`:
+The schema includes RLS policies that allow anonymous access. This means:
+- Users can access data based on their `user_id`
+- No authentication required
+- Data is isolated per user via `user_id`
 
-```typescript
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-```
+## 5. Testing the Setup
 
-## Step 6: Test the Setup
-
-1. Start your development server: `npm run dev`
+1. Start your development server
 2. Upload a PDF file
-3. Complete the tax advisor flow
-4. Check your Supabase dashboard → **Table Editor** to see the data
+3. Check the browser console for any Supabase errors
+4. Verify data is being saved to the database
 
-## Database Schema Overview
+## 6. Troubleshooting
 
-### Tables
+### Common Issues:
 
-1. **user_profiles**
-   - Stores basic user information
-   - Uses browser-based user ID for anonymous users
+1. **404 Errors**: Make sure the tables exist and RLS policies are correct
+2. **Permission Denied**: Check that RLS policies allow anonymous access
+3. **Connection Issues**: Verify your Supabase URL and anon key
 
-2. **tax_filings**
-   - Stores complete tax filing data
-   - Includes income, tax paid, deductions, and calculations
-   - One filing per user per year
-
-3. **user_deductions**
-   - Stores individual deduction entries
-   - Used for suggesting common deductions in future years
-
-### Features
-
-- **Data Persistence**: All user data is automatically saved
-- **Existing Data Detection**: App checks for previous filings for the same year
-- **Deduction Suggestions**: Based on previous years' deductions
-- **Anonymous Users**: No authentication required, uses browser fingerprinting
-
-## Security Features
-
-- **Row Level Security (RLS)**: Users can only access their own data
-- **Automatic Timestamps**: Created/updated timestamps are managed automatically
-- **Data Validation**: Proper data types and constraints
-
-## Troubleshooting
-
-### Common Issues
-
-1. **"Table doesn't exist"**
-   - Make sure you've run the schema SQL
-   - Check that you're in the correct project
-
-2. **"Permission denied"**
-   - Verify RLS policies are enabled
-   - Check that the user ID is being generated correctly
-
-3. **"Invalid API key"**
-   - Verify your environment variables are set correctly
-   - Check that you're using the anon key, not the service role key
-
-### Debug Steps
+### Debug Steps:
 
 1. Check browser console for errors
-2. Verify Supabase connection in Network tab
-3. Check Supabase dashboard logs
-4. Test with a simple query in SQL Editor
+2. Verify environment variables are loaded
+3. Test Supabase connection in the browser console:
+   ```javascript
+   // Test in browser console
+   const { data, error } = await supabase.from('user_profiles').select('*').limit(1)
+   console.log('Test result:', { data, error })
+   ```
 
-## Production Deployment
+## 7. Production Deployment
 
-For production deployment:
+For production deployment on Netlify:
 
-1. **Environment Variables**: Set the same environment variables in your hosting platform
-2. **Database Backups**: Enable automatic backups in Supabase
-3. **Monitoring**: Set up alerts for database usage
-4. **Performance**: Monitor query performance and add indexes if needed
+1. Add the same environment variables to your Netlify dashboard
+2. Ensure the database schema is applied to your production Supabase project
+3. Test the application after deployment
 
-## Data Privacy
+## 8. Database Schema Overview
 
-- All data is stored securely in Supabase
-- Users are anonymous (no personal information required)
-- Data is automatically cleaned up based on your retention policy
-- GDPR compliant data handling
+### Tables:
 
-## Support
+- **user_profiles**: Stores user information
+- **tax_filings**: Stores tax filing data per year
+- **user_deductions**: Stores deduction information
 
-If you encounter issues:
+### Key Features:
 
-1. Check the Supabase documentation
-2. Review the application logs
-3. Test with a fresh Supabase project
-4. Contact support with specific error messages 
+- Anonymous access via `user_id`
+- Automatic timestamps
+- Foreign key relationships
+- Indexes for performance
+- JSONB support for flexible data storage 

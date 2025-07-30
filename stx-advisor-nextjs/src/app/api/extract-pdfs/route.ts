@@ -14,16 +14,31 @@ export async function POST(request: NextRequest) {
       const formDataToSend = new FormData()
       formDataToSend.append('file', file)
 
-      const response = await fetch(`${config.backendUrl}/extract-text`, {
-        method: 'POST',
-        body: formDataToSend,
-      })
+      // Add timeout to the fetch request
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 30000) // 30 second timeout
 
-      if (!response.ok) {
-        throw new Error(`Failed to extract text from ${file.name}`)
+      try {
+        const response = await fetch(`${config.backendUrl}/extract-text`, {
+          method: 'POST',
+          body: formDataToSend,
+          signal: controller.signal,
+        })
+
+        clearTimeout(timeoutId)
+
+        if (!response.ok) {
+          throw new Error(`Failed to extract text from ${file.name}: ${response.status}`)
+        }
+
+        return response.json()
+      } catch (error) {
+        clearTimeout(timeoutId)
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw new Error(`Timeout extracting text from ${file.name}`)
+        }
+        throw error
       }
-
-      return response.json()
     })
 
     const results = await Promise.all(uploadPromises)
@@ -85,7 +100,7 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     console.error('Error processing files:', error)
     return NextResponse.json(
-      { error: 'Failed to process files' },
+      { error: error instanceof Error ? error.message : 'Failed to process files' },
       { status: 500 }
     )
   }
