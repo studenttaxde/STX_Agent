@@ -4,6 +4,13 @@
 
 [build.environment]
   NODE_VERSION = "18"
+  BACKEND_URL = "https://pdf-extractor-service.onrender.com"
+  LANGCHAIN_API_KEY = "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"
+  LANGCHAIN_PROJECT = "STX_Advisor"
+  LANGCHAIN_ENDPOINT = "https://api.smith.langchain.com"
+  LANGCHAIN_TRACING_V2 = "true"
+  NEXT_PUBLIC_SUPABASE_URL = "https://hwvmhmstwnrwcqgazqtu.supabase.co"
+  NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh3dm1obXN0d25yd2NxZ2F6cXR1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTI2MTA2NDEsImV4cCI6MjA2ODE4NjY0MX0.60h2Qyt5aguL6ea1hJTio7ICs7S4bK2mHRsorHjGcXs"
 
 [[redirects]]
   from = "/*"
