@@ -1,0 +1,14 @@
+Lohnabrechnung
+
+Firma: Musterfirma GmbH
+Adresse: Musterstraße 1, 12345 Musterstadt
+
+Mitarbeiter: Max Mustermann
+Adresse: Beispielweg 2, 12345 Musterstadt
+
+Zeitraum: 01.12.2023 - 31.12.2023
+Jahr: 2023
+
+Bruttolohn: 4500.00
+Lohnsteuer: 850.50
+Solidaritätszuschlag: 46.77

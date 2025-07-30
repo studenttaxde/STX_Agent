@@ -1,0 +1,16 @@
+INFO:     Started server process [41166]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8001 (Press CTRL+C to quit)
+ERROR:main:Could not open or parse german_tax_data.pdf: Failed to open file '/var/folders/nm/2b58vb555wn56qxz8y15wpw00000gn/T/tmpn9e70xbc.pdf'.
+INFO:     127.0.0.1:54977 - "POST /extract-text HTTP/1.1" 200 OK
+INFO:main:Successfully extracted text from Lohnsteuerbescheinigung_2024_62010574032_Trust_Promotion_GmbH.pdf (1 pages)
+INFO:     127.0.0.1:55052 - "POST /extract-text HTTP/1.1" 200 OK
+INFO:main:Successfully extracted text from Lohnsteuerbescheinigung_2024_62010574032_Trust_Promotion_GmbH.pdf (1 pages)
+INFO:     127.0.0.1:56344 - "POST /extract-text HTTP/1.1" 200 OK
+INFO:main:Successfully extracted text from Lohnsteuerbescheinigung_2024_62010574032_Trust_Promotion_GmbH.pdf (1 pages)
+INFO:     127.0.0.1:57125 - "POST /extract-text HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [41166]
