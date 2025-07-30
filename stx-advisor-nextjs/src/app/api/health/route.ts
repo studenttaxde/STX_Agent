@@ -4,27 +4,27 @@ export async function GET() {
   try {
     // Check if required environment variables are set
     const openaiKey = process.env.OPENAI_API_KEY;
-    const pdfExtractorUrl = process.env.PDF_EXTRACTOR_URL || 'http://localhost:8001';
+    const backendUrl = process.env.BACKEND_URL || 'http://localhost:8001';
 
     const checks = {
       openai_configured: !!openaiKey,
-      pdf_extractor_url: pdfExtractorUrl,
-      pdf_extractor_healthy: false
+      backend_url: backendUrl,
+      backend_healthy: false
     };
 
-    // Check PDF extractor service health
+    // Check backend service health
     try {
-      const response = await fetch(`${pdfExtractorUrl}/health`, {
+      const response = await fetch(`${backendUrl}/health`, {
         method: 'GET',
         headers: { 'Content-Type': 'application/json' }
       });
-      checks.pdf_extractor_healthy = response.ok;
+      checks.backend_healthy = response.ok;
     } catch (error) {
-      console.warn('PDF extractor health check failed:', error);
-      checks.pdf_extractor_healthy = false;
+      console.warn('Backend health check failed:', error);
+      checks.backend_healthy = false;
     }
 
-    const allHealthy = checks.openai_configured && checks.pdf_extractor_healthy;
+    const allHealthy = checks.openai_configured && checks.backend_healthy;
 
     return NextResponse.json({
       status: allHealthy ? 'healthy' : 'degraded',
