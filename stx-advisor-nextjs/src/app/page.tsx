@@ -98,30 +98,31 @@ function AdvisorChat() {
     if (!files || files.length === 0) return
 
     // Validate files before processing
-    const fileArray = Array.from(files)
-    const maxFileSize = 10 * 1024 * 1024 // 10MB per file
-    const maxFiles = 10 // Maximum 10 files at once
-    
-    if (fileArray.length > maxFiles) {
-      alert(`Too many files selected. Please upload a maximum of ${maxFiles} files at once.`)
+    const maxFiles = 10
+    const maxFileSize = 10 * 1024 * 1024 // 10MB
+    const maxTotalSize = 50 * 1024 * 1024 // 50MB
+
+    if (files.length > maxFiles) {
+      alert(`Please select no more than ${maxFiles} files`)
       return
     }
 
-    const oversizedFiles = fileArray.filter(file => file.size > maxFileSize)
-    if (oversizedFiles.length > 0) {
-      alert(`Some files are too large:\n${oversizedFiles.map(f => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)}MB)`).join('\n')}\n\nPlease use files smaller than 10MB each.`)
-      return
+    let totalSize = 0
+    for (let i = 0; i < files.length; i++) {
+      if (files[i].size > maxFileSize) {
+        alert(`File ${files[i].name} is too large. Maximum size is 10MB`)
+        return
+      }
+      totalSize += files[i].size
     }
 
-    const totalSize = fileArray.reduce((sum, file) => sum + file.size, 0)
-    const maxTotalSize = 50 * 1024 * 1024 // 50MB total
     if (totalSize > maxTotalSize) {
-      alert(`Total file size (${(totalSize / 1024 / 1024).toFixed(1)}MB) is too large. Please upload files with a total size less than 50MB.`)
+      alert('Total file size exceeds 50MB limit')
       return
     }
 
-    setState(prev => ({ ...prev, loading: true }))
-    setProcessingStatus(`Preparing ${files.length} files for upload...`)
+    setState(prev => ({ ...prev, loading: true, step: 'upload' }))
+    setProcessingStatus('Preparing files for upload...')
 
     try {
       const formData = new FormData()
@@ -129,7 +130,7 @@ function AdvisorChat() {
         formData.append('files', file)
       })
 
-      setProcessingStatus(`Uploading ${files.length} files to server...`)
+      setProcessingStatus('Uploading files to server...')
 
       // Add retry logic for production timeouts
       let response: Response | undefined
@@ -188,13 +189,16 @@ function AdvisorChat() {
         console.warn(`${failedResults.length} files failed to process:`, failedResults)
         setProcessingStatus(`Warning: ${failedResults.length} files failed to process. Continuing with ${successfulResults.length} successful files...`)
       }
-      
-      let totalGrossIncome = 0
-      let totalIncomeTaxPaid = 0
-      let totalSolidaritaetszuschlag = 0
-      let employer = ''
-      let fullName = ''
-      let year = ''
+
+      setProcessingStatus('Initializing tax advisor...')
+
+      // Process each result and aggregate data
+      const aggregatedData: any = {
+        totalIncome: 0,
+        employers: [],
+        years: new Set(),
+        documents: []
+      }
 
       successfulResults.forEach((result: any) => {
         console.log('Processing result:', result)
@@ -202,165 +206,125 @@ function AdvisorChat() {
         console.log('Result data:', resultData)
         console.log('Result data keys:', Object.keys(resultData))
         console.log('Result data values:', Object.values(resultData))
-        
-        if (resultData.bruttolohn) {
-          const bruttolohn = typeof resultData.bruttolohn === 'string' ? parseFloat(resultData.bruttolohn) : resultData.bruttolohn
-          if (!isNaN(bruttolohn)) {
-            totalGrossIncome += bruttolohn
-            console.log('Added bruttolohn:', bruttolohn, 'Total now:', totalGrossIncome)
-          }
-        }
-        
-        if (resultData.lohnsteuer) {
-          const lohnsteuer = typeof resultData.lohnsteuer === 'string' ? parseFloat(resultData.lohnsteuer) : resultData.lohnsteuer
-          if (!isNaN(lohnsteuer)) {
-            totalIncomeTaxPaid += lohnsteuer
-            console.log('Added lohnsteuer:', lohnsteuer, 'Total now:', totalIncomeTaxPaid)
-          }
-        }
-        
-        if (resultData.solidaritaetszuschlag) {
-          const solidaritaetszuschlag = typeof resultData.solidaritaetszuschlag === 'string' ? parseFloat(resultData.solidaritaetszuschlag) : resultData.solidaritaetszuschlag
-          if (!isNaN(solidaritaetszuschlag)) {
-            totalSolidaritaetszuschlag += solidaritaetszuschlag
-            console.log('Added solidaritaetszuschlag:', solidaritaetszuschlag, 'Total now:', totalSolidaritaetszuschlag)
-          }
+
+        // Aggregate income
+        if (resultData.bruttoarbeitslohn) {
+          aggregatedData.totalIncome += parseFloat(resultData.bruttoarbeitslohn) || 0
         }
 
-        if (resultData.employer && !employer) {
-          employer = resultData.employer
-          console.log('Set employer:', employer)
+        // Collect employers
+        if (resultData.employer) {
+          aggregatedData.employers.push(resultData.employer)
         }
-        
-        if (resultData.name && !fullName) {
-          fullName = resultData.name
-          console.log('Set fullName:', fullName)
+
+        // Collect years
+        if (resultData.year) {
+          aggregatedData.years.add(resultData.year)
         }
-        
-        if (resultData.year && !year) {
-          year = resultData.year.toString()
-          console.log('Set year:', year)
-        }
+
+        // Store document info
+        aggregatedData.documents.push({
+          filename: result.filename,
+          data: resultData
+        })
       })
 
-      setProcessingStatus('Finalizing analysis...')
+      console.log('Final aggregated data:', aggregatedData)
 
-      const aggregatedData = {
-        year: parseInt(year) || new Date().getFullYear(),
-        gross_income: totalGrossIncome,
-        income_tax_paid: totalIncomeTaxPaid,
-        solidaritaetszuschlag: totalSolidaritaetszuschlag,
-        employer: employer || 'Unknown',
-        full_name: fullName || 'User'
+      // Check for existing data for the year
+      const years = Array.from(aggregatedData.years)
+      if (years.length > 0) {
+        const year = Math.max(...years.map((y: any) => parseInt(y)))
+        const existingFiling = await checkExistingDataForYear(year)
+        if (existingFiling) {
+          // User chose to use existing data, so we don't proceed with new processing
+          return
+        }
       }
 
-      console.log('Final aggregated data:', aggregatedData)
-      console.log('Aggregated data keys:', Object.keys(aggregatedData))
-      console.log('Aggregated data values:', Object.values(aggregatedData))
+              // Load suggested deductions
+        try {
+          const year = Math.max(...years.map((y: any) => parseInt(y)))
+          const suggestions = await getSuggestedDeductions(userId, year)
+          setSuggestedDeductions(suggestions)
+        } catch (error) {
+          console.error('Error fetching suggested deductions:', error)
+        }
 
-      // Check for existing data for this year
-      const existingFiling = await checkExistingDataForYear(aggregatedData.year)
-      
-      if (existingFiling) {
-        setState(prev => ({
+      // Update state with extracted data
+              setState(prev => ({
           ...prev,
           loading: false,
-          extractedData: aggregatedData,
+          step: 'advisor',
+          extractedData: {
+            ...aggregatedData,
+            gross_income: aggregatedData.totalIncome,
+            year: Math.max(...years.map((y: any) => parseInt(y)))
+          },
           multiPDFData: {
             totalFiles: successfulResults.length,
+            results: successfulResults,
             summary: {
-              year: aggregatedData.year,
-              grossIncome: aggregatedData.gross_income,
-              incomeTaxPaid: aggregatedData.income_tax_paid,
-              solidarityTax: aggregatedData.solidaritaetszuschlag,
-              employer: aggregatedData.employer,
-              fullName: aggregatedData.full_name
-            },
-            results: successfulResults.map((result: any) => result.data)
-          }
-        }))
-        setProcessingStatus('')
-        return
-      }
-
-      // Load suggested deductions
-      const deductions = await getSuggestedDeductions(userId, aggregatedData.year)
-      setSuggestedDeductions(deductions)
-
-      setState(prev => ({
-        ...prev,
-        loading: false,
-        step: 'advisor',
-        extractedData: aggregatedData,
-        multiPDFData: {
-          totalFiles: successfulResults.length,
-          summary: {
-            year: aggregatedData.year,
-            grossIncome: aggregatedData.gross_income,
-            incomeTaxPaid: aggregatedData.income_tax_paid,
-            solidarityTax: aggregatedData.solidaritaetszuschlag,
-            employer: aggregatedData.employer,
-            fullName: aggregatedData.full_name
+              year: Math.max(...years.map((y: any) => parseInt(y))),
+              grossIncome: aggregatedData.totalIncome,
+              incomeTaxPaid: 0,
+              employer: aggregatedData.employers[0] || 'Unknown',
+              fullName: 'User'
+            }
           },
-          results: successfulResults.map((result: any) => result.data)
-        }
-      }))
+          messages: [
+            {
+              sender: 'assistant',
+              text: `Great! I've analyzed your ${successfulResults.length} tax document${successfulResults.length > 1 ? 's' : ''}. Here's what I found:
 
-      setProcessingStatus('')
+**Total Income:** €${formatCurrency(aggregatedData.totalIncome)}
+**Employer${aggregatedData.employers.length > 1 ? 's' : ''}:** ${getUniqueEmployers().join(', ')}
+**Year${years.length > 1 ? 's' : ''}:** ${years.join(', ')}
 
-      // Initialize the advisor with the extracted data
+I can help you with your German tax filing. Would you like me to:
+1. Guide you through potential deductions
+2. Calculate your tax liability
+3. Help you understand your tax situation
+
+What would you prefer to start with?`
+            }
+          ]
+        }))
+
+      // Initialize the advisor after successful processing
       try {
-        setProcessingStatus('Initializing tax advisor...')
-        
         const advisorResponse = await fetch('/api/advisor', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json'
+          },
           body: JSON.stringify({
             action: 'initialize',
-            sessionId: 'default',
-            extractedData: aggregatedData,
-            existingData: null,
-            suggestedDeductions: deductions
+            extractedData: aggregatedData
           })
         })
 
         if (advisorResponse.ok) {
-          const advisorData = await advisorResponse.json()
-          setState(prev => ({
-            ...prev,
-            messages: [
-              { sender: 'assistant', text: advisorData.message }
-            ]
-          }))
-        } else {
-          console.error('Failed to initialize advisor:', await advisorResponse.text())
-          // Add a fallback message
-          setState(prev => ({
-            ...prev,
-            messages: [
-              { sender: 'assistant', text: 'Hello! I\'ve analyzed your tax documents. Let me help you with your tax filing process. Please confirm the tax year and I\'ll guide you through the deductions.' }
-            ]
-          }))
+          console.log('Advisor initialized successfully')
         }
       } catch (error) {
         console.error('Error initializing advisor:', error)
-        // Add a fallback message
-        setState(prev => ({
-          ...prev,
-          messages: [
-            { sender: 'assistant', text: 'Hello! I\'ve analyzed your tax documents. Let me help you with your tax filing process. Please confirm the tax year and I\'ll guide you through the deductions.' }
-          ]
-        }))
       }
 
     } catch (error) {
-      console.error('File upload error:', error)
-      setState(prev => ({ ...prev, loading: false }))
+      console.error('Upload error:', error)
+      setState(prev => ({ 
+        ...prev, 
+        loading: false,
+        messages: [
+          {
+            sender: 'assistant',
+            text: `I encountered an issue processing your documents: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again with different files or contact support if the problem persists.`
+          }
+        ]
+      }))
+    } finally {
       setProcessingStatus('')
-      
-      // Show user-friendly error message
-      const errorMessage = error instanceof Error ? error.message : 'Upload failed'
-      alert(`Upload failed: ${errorMessage}\n\nPlease try:\n- Uploading fewer files at once (max 10)\n- Using smaller PDF files (max 10MB each)\n- Checking your internet connection`)
     }
   }
 
@@ -368,157 +332,140 @@ function AdvisorChat() {
     if (!message.trim()) return
 
     // Add user message to chat
-    setState(prev => ({
-      ...prev,
-      messages: [...prev.messages, { sender: 'user', text: message }]
-    }))
+            setState(prev => ({
+          ...prev,
+          messages: [...prev.messages, { sender: 'user', text: message }]
+        }))
 
     try {
       const response = await fetch('/api/advisor', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({
           action: 'respond',
-          sessionId: 'default',
-          message: message
+          message: message,
+          extractedData: state.extractedData,
+          multiPDFData: state.multiPDFData
         })
       })
 
       if (response.ok) {
         const data = await response.json()
         
-        if (data.success) {
-          setState(prev => ({
-            ...prev,
-            messages: [...prev.messages, { sender: 'assistant', text: data.message }],
-            done: data.done || false,
-            deductionFlow: data.deduction_flow || null,
-            currentQuestionIndex: data.current_question_index || 0,
-            deductionAnswers: data.deduction_answers || {},
-            taxCalculation: data.tax_calculation || null
-          }))
-        } else {
-          setState(prev => ({
-            ...prev,
-            messages: [...prev.messages, { sender: 'assistant', text: 'Sorry, I encountered an error. Please try again.' }]
-          }))
-        }
-      } else {
         setState(prev => ({
           ...prev,
-          messages: [...prev.messages, { sender: 'assistant', text: 'Sorry, I encountered an error. Please try again.' }]
+          messages: [...prev.messages, { sender: 'assistant', text: data.message }],
+          done: data.done || false,
+          deductionFlow: data.deductionFlow || prev.deductionFlow,
+          currentQuestionIndex: data.currentQuestionIndex || prev.currentQuestionIndex,
+          taxCalculation: data.taxCalculation || prev.taxCalculation
         }))
+
+        // If the advisor is done, save the filing
+        if (data.done && data.taxCalculation) {
+          try {
+            const year = state.extractedData?.year || new Date().getFullYear()
+            
+            await saveTaxFiling({
+              user_id: userId,
+              year: year,
+              gross_income: state.extractedData?.gross_income || 0,
+              income_tax_paid: 0,
+              employer: state.extractedData?.employer || 'Unknown',
+              full_name: 'User',
+              deductions: state.deductionAnswers
+            })
+
+            console.log('Tax filing saved successfully')
+          } catch (error) {
+            console.error('Error saving tax filing:', error)
+          }
+        }
+      } else {
+        throw new Error('Failed to get advisor response')
       }
     } catch (error) {
-      console.error('Error sending message:', error)
-      setState(prev => ({
-        ...prev,
-        messages: [...prev.messages, { sender: 'assistant', text: 'Sorry, I encountered an error. Please try again.' }]
-      }))
+      console.error('Error getting advisor response:', error)
+              setState(prev => ({
+          ...prev,
+          messages: [...prev.messages, { 
+            sender: 'assistant', 
+            text: 'I apologize, but I encountered an error processing your request. Please try again or contact support if the problem persists.' 
+          }]
+        }))
     }
   }
 
   const handleFileAnotherYear = () => {
     setState(prev => ({
       ...prev,
-      step: 'upload',
       messages: [],
+      loading: false,
+      step: 'upload',
       extractedData: null,
       multiPDFData: null,
+      filedSummaries: [],
       deductionAnswers: {},
       currentQuestionIndex: 0,
       deductionFlow: null,
       taxCalculation: null,
       done: false
     }))
-    setShowExistingDataModal(false)
   }
 
   const handleUseExistingData = async (existingFiling: any) => {
-    try {
-      setState(prev => ({
-        ...prev,
-        step: 'advisor',
-        extractedData: {
-          year: existingFiling.year,
-          gross_income: existingFiling.gross_income,
-          income_tax_paid: existingFiling.income_tax_paid,
-          solidaritaetszuschlag: existingFiling.solidarity_tax || 0,
-          employer: existingFiling.employer,
-          full_name: existingFiling.full_name
-        }
-      }))
-
-      const deductions = await getSuggestedDeductions(userId, existingFiling.year)
-      setSuggestedDeductions(deductions)
-
-      const advisorResponse = await fetch('/api/advisor', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'initialize',
-          sessionId: 'default',
-          extractedData: {
-            year: existingFiling.year,
-            gross_income: existingFiling.gross_income,
-            income_tax_paid: existingFiling.income_tax_paid,
-            solidaritaetszuschlag: existingFiling.solidarity_tax || 0,
-            employer: existingFiling.employer,
-            full_name: existingFiling.full_name
-          },
-          existingData: existingFiling,
-          suggestedDeductions: deductions
-        })
-      })
-
-      if (advisorResponse.ok) {
-        const advisorData = await advisorResponse.json()
-        setState(prev => ({
+    setShowExistingDataModal(false)
+    
+            setState(prev => ({
           ...prev,
+          step: 'advisor',
+          extractedData: {
+            gross_income: existingFiling.totalIncome,
+            employer: existingFiling.employer || 'Unknown',
+            year: existingFiling.year
+          },
           messages: [
-            { sender: 'assistant', text: advisorData.message }
+            {
+              sender: 'assistant',
+              text: `Welcome back! I can see you have existing data for ${existingFiling.year}. Your total income was €${formatCurrency(existingFiling.totalIncome)}. Would you like me to help you with anything specific about your tax filing?`
+            }
           ]
         }))
-      }
-
-      setShowExistingDataModal(false)
-    } catch (error) {
-      console.error('Error using existing data:', error)
-      setShowExistingDataModal(false)
-    }
   }
 
   const handleStartNew = () => {
     setShowExistingDataModal(false)
+    setState(prev => ({
+      ...prev,
+      step: 'upload'
+    }))
   }
 
   const formatCurrency = (amount: number | string | undefined) => {
-    if (amount === undefined || amount === null) return '€0,00'
+    if (amount === undefined || amount === null) return '0'
     const num = typeof amount === 'string' ? parseFloat(amount) : amount
-    return `€${num.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+    return num.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
 
   const getUniqueEmployers = () => {
-    if (!state.multiPDFData?.results) return []
-    const employers = state.multiPDFData.results
-      .map((result: any) => result.employer)
-      .filter((employer: string) => employer && employer !== 'Unknown')
-    return [...new Set(employers)]
+    if (!state.extractedData?.employer) return []
+    return [state.extractedData.employer]
   }
 
   return (
     <div className="max-w-4xl mx-auto p-6">
       <div className="bg-white shadow rounded-lg">
-        {state.step === 'upload' && (
-          <div className="p-6">
-            <h2 className="text-2xl font-bold text-gray-900 mb-6">German Tax Advisor</h2>
-            
+        <div className="p-6">
+          <h2 className="text-2xl font-bold text-gray-900 mb-6">German Tax Advisor</h2>
+          
+          {state.step === 'upload' && (
             <div className="mb-6">
               <label htmlFor="file-upload" className="block text-sm font-medium text-gray-700 mb-2">
                 Upload your German tax documents (PDF)
               </label>
               <input
-                ref={fileInputRef}
                 type="file"
                 id="file-upload"
                 multiple
@@ -538,73 +485,58 @@ function AdvisorChat() {
                 </div>
               )}
             </div>
+          )}
 
-            {existingData && existingData.length > 0 && (
-              <div className="mt-6 p-4 bg-blue-50 rounded-md">
-                <h3 className="text-sm font-medium text-blue-900 mb-2">Previous Filings</h3>
-                <div className="space-y-2">
-                  {existingData.map((filing: any, index: number) => (
-                    <div key={index} className="text-sm text-blue-800">
-                      {filing.year}: {formatCurrency(filing.gross_income)} - {filing.employer}
-                    </div>
-                  ))}
-                </div>
+          {state.step === 'advisor' && (
+            <div className="flex flex-col h-96">
+              <div className="flex-1 overflow-y-auto space-y-4 mb-4" ref={chatContainerRef}>
+                                 {state.messages.map((message, index) => (
+                   <div
+                     key={index}
+                     className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+                   >
+                     <div
+                       className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                         message.sender === 'user'
+                           ? 'bg-blue-600 text-white'
+                           : 'bg-gray-100 text-gray-900'
+                       }`}
+                     >
+                       {message.text}
+                     </div>
+                   </div>
+                 ))}
               </div>
-            )}
-          </div>
-        )}
-
-        {state.step === 'advisor' && (
-          <div className="flex flex-col h-96">
-            <div className="flex-1 overflow-y-auto p-6" ref={chatContainerRef}>
-              {state.messages.map((message, index) => (
-                <div
-                  key={index}
-                  className={`mb-4 ${
-                    message.sender === 'user' ? 'text-right' : 'text-left'
-                  }`}
+              
+              <div className="border-t p-4">
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    const input = e.currentTarget.elements.namedItem('message') as HTMLInputElement
+                    if (input.value.trim()) {
+                      handleUserResponse(input.value)
+                      input.value = ''
+                    }
+                  }}
+                  className="flex space-x-2"
                 >
-                  <div
-                    className={`inline-block max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                      message.sender === 'user'
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-gray-200 text-gray-800'
-                    }`}
+                  <input
+                    type="text"
+                    name="message"
+                    placeholder="Type your message..."
+                    className="flex-1 border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  <button
+                    type="submit"
+                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
                   >
-                    {message.text}
-                  </div>
-                </div>
-              ))}
+                    Send
+                  </button>
+                </form>
+              </div>
             </div>
-            
-            <div className="border-t p-4">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault()
-                  const input = e.currentTarget.elements.namedItem('message') as HTMLInputElement
-                  if (input.value.trim()) {
-                    handleUserResponse(input.value)
-                    input.value = ''
-                  }
-                }}
-                className="flex space-x-2"
-              >
-                <input
-                  type="text"
-                  name="message"
-                  placeholder="Type your message..."
-                  className="flex-1 border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-                <button
-                  type="submit"
-                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-                >
-                  Send
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Existing Data Modal */}
@@ -613,14 +545,14 @@ function AdvisorChat() {
           <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
             <div className="mt-3 text-center">
               <h3 className="text-lg font-medium text-gray-900 mb-4">
-                Existing Filing Found
+                Existing Data Found
               </h3>
               <p className="text-sm text-gray-500 mb-6">
-                We found an existing filing for this year. Would you like to use it or start fresh?
+                We found existing tax filing data for this year. Would you like to use the existing data or start fresh?
               </p>
               <div className="flex space-x-3">
                 <button
-                  onClick={() => handleUseExistingData(existingData.find((f: any) => f.year === state.extractedData?.year))}
+                  onClick={() => handleUseExistingData(existingData)}
                   className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
                 >
                   Use Existing
@@ -651,18 +583,17 @@ export default function TaxAdvisorApp() {
         
         <Tabs 
           tabs={[
-            { 
-              key: 'advisor', 
-              label: 'Advisor', 
+            {
+              key: 'advisor',
+              label: 'Advisor',
               content: <AdvisorChat />
             },
-            { 
-              key: 'autopilot', 
-              label: 'Autopilot', 
+            {
+              key: 'autopilot',
+              label: 'Autopilot',
               content: <AutopilotFlow />
             }
           ]}
-          defaultTab="advisor"
         />
       </div>
     </div>
