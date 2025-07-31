@@ -138,6 +138,8 @@ export default function TaxAdvisorApp() {
 
       // Aggregate the results from successful extractions
       const successfulResults = data.results || []
+      console.log('Successful results:', successfulResults)
+      
       let totalGrossIncome = 0
       let totalIncomeTaxPaid = 0
       let totalSolidaritaetszuschlag = 0
@@ -146,11 +148,15 @@ export default function TaxAdvisorApp() {
       let year = ''
 
       successfulResults.forEach((result: any) => {
+        console.log('Processing result:', result)
         const resultData = result.data
+        console.log('Result data:', resultData)
+        
         if (resultData.bruttolohn) {
           const bruttolohn = typeof resultData.bruttolohn === 'string' ? parseFloat(resultData.bruttolohn) : resultData.bruttolohn
           if (!isNaN(bruttolohn)) {
             totalGrossIncome += bruttolohn
+            console.log('Added bruttolohn:', bruttolohn, 'Total now:', totalGrossIncome)
           }
         }
         
@@ -158,6 +164,7 @@ export default function TaxAdvisorApp() {
           const lohnsteuer = typeof resultData.lohnsteuer === 'string' ? parseFloat(resultData.lohnsteuer) : resultData.lohnsteuer
           if (!isNaN(lohnsteuer)) {
             totalIncomeTaxPaid += lohnsteuer
+            console.log('Added lohnsteuer:', lohnsteuer, 'Total now:', totalIncomeTaxPaid)
           }
         }
         
@@ -165,19 +172,23 @@ export default function TaxAdvisorApp() {
           const solidaritaetszuschlag = typeof resultData.solidaritaetszuschlag === 'string' ? parseFloat(resultData.solidaritaetszuschlag) : resultData.solidaritaetszuschlag
           if (!isNaN(solidaritaetszuschlag)) {
             totalSolidaritaetszuschlag += solidaritaetszuschlag
+            console.log('Added solidaritaetszuschlag:', solidaritaetszuschlag, 'Total now:', totalSolidaritaetszuschlag)
           }
         }
 
         if (resultData.employer && !employer) {
           employer = resultData.employer
+          console.log('Set employer:', employer)
         }
         
         if (resultData.name && !fullName) {
           fullName = resultData.name
+          console.log('Set fullName:', fullName)
         }
         
         if (resultData.year && !year) {
           year = resultData.year.toString()
+          console.log('Set year:', year)
         }
       })
 
@@ -190,6 +201,8 @@ export default function TaxAdvisorApp() {
         full_name: fullName || 'User',
         results: successfulResults
       }
+      
+      console.log('Final aggregated data:', aggregatedData)
 
       // Check for existing data for this year
       const yearNum = aggregatedData.year
