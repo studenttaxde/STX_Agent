@@ -119,6 +119,7 @@ export default function AutopilotFlow() {
 
   // Handle clarification questions completion
   const handleClarificationComplete = (answers: Record<string, any>) => {
+    console.log('Clarification completed with answers:', answers)
     setClarificationAnswers(answers)
     setShowClarificationQuestions(false)
     
@@ -127,17 +128,23 @@ export default function AutopilotFlow() {
       const updatedFields = { ...extractedFields }
       
       if (answers.commute_distance) {
-        updatedFields.werbungskosten = (answers.commute_distance * 0.30 * 220) // 30 cents per km, 220 working days
+        const newWerbungskosten = (answers.commute_distance * 0.30 * 220) // 30 cents per km, 220 working days
+        console.log('Updated Werbungskosten:', newWerbungskosten, 'from commute distance:', answers.commute_distance)
+        updatedFields.werbungskosten = newWerbungskosten
       }
       
       if (answers.health_insurance) {
-        updatedFields.sozialversicherung = answers.health_insurance === 'Yes' ? 5000 : 0
+        const newSozialversicherung = answers.health_insurance === 'Yes' ? 5000 : 0
+        console.log('Updated Sozialversicherung:', newSozialversicherung, 'from health insurance:', answers.health_insurance)
+        updatedFields.sozialversicherung = newSozialversicherung
       }
       
+      console.log('Updated extracted fields:', updatedFields)
       setExtractedFields(updatedFields)
     }
     
     // Now show deductions
+    console.log('Showing deductions after clarification:', deductions)
     setDeductions(deductions)
     setShowDeductions(true)
     setMessage('')
@@ -225,31 +232,41 @@ export default function AutopilotFlow() {
       console.log('Autopilot response:', data)
 
       if (data.message) {
+        console.log('Received message response:', data.message)
         setMessage(data.message)
         setShowDeductions(false)
       } else if (data.deductions && Array.isArray(data.deductions)) {
+        console.log('Processing deductions response:', data.deductions.length, 'deductions')
+        
         // Validate extracted fields if available
         if (data.extractedFields) {
+          console.log('Validating extracted fields:', data.extractedFields)
           const validation = validateExtractedFields(data.extractedFields)
           if (!validation.isValid) {
+            console.log('Validation failed:', validation.errors)
             setMessage(`Data validation failed: ${validation.errors.join(', ')}`)
             setShowDeductions(false)
             return
           }
+          console.log('Validation passed, setting extracted fields')
           setExtractedFields(data.extractedFields)
         }
         
         // Check if clarification questions are needed
         const missingFields = checkForMissingFields(data.extractedFields)
+        console.log('Missing fields check:', missingFields.length, 'questions needed')
         if (missingFields.length > 0) {
+          console.log('Showing clarification questions:', missingFields)
           setShowClarificationQuestions(true)
           return
         }
         
+        console.log('Setting deductions and showing review:', data.deductions)
         setDeductions(data.deductions)
         setShowDeductions(true)
         setMessage('')
       } else {
+        console.log('Unexpected response format:', data)
         throw new Error('Unexpected response format from autopilot API')
       }
     } catch (error) {
