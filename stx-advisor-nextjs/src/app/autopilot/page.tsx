@@ -72,7 +72,7 @@ export default function AutopilotFlow() {
       while (retryCount <= maxRetries) {
         try {
           setProcessingStatus(`Processing ${selectedFiles.length} documents... (attempt ${retryCount + 1}/${maxRetries + 1})`)
-          response = await fetch('/api/extract-pdfs', {
+          response = await fetch('/api/advisor/autodetect', {
             method: 'POST',
             body: formData
           })
@@ -88,76 +88,25 @@ export default function AutopilotFlow() {
         }
       }
 
-      setProcessingStatus('Analyzing extracted data...')
+      setProcessingStatus('Analyzing results...')
 
       if (!response || !response.ok) {
         const errorData = await response?.json().catch(() => ({}))
-        throw new Error(errorData?.error || 'Extraction failed')
+        throw new Error(errorData?.error || 'Autopilot processing failed')
       }
 
       const data = await response.json()
-      console.log('Data extracted:', data)
+      console.log('Autopilot response:', data)
 
-      // Handle the new response format
-      if (!data.success) {
-        throw new Error(data.error || 'Extraction failed')
-      }
-
-      setProcessingStatus('Processing results...')
-
-      // Aggregate the results from successful extractions
-      const successfulResults = data.results || []
-      const failedResults = data.failed || []
-      
-      console.log('Successful results:', successfulResults)
-      console.log('Failed results:', failedResults)
-      
-      if (successfulResults.length === 0) {
-        throw new Error('No files were processed successfully. Please try again with different files.')
-      }
-
-      // Show warning if some files failed
-      if (failedResults.length > 0) {
-        console.warn(`${failedResults.length} files failed to process:`, failedResults)
-        setProcessingStatus(`Warning: ${failedResults.length} files failed to process. Continuing with ${successfulResults.length} successful files...`)
-      }
-
-      setProcessingStatus('Sending to autopilot API...')
-
-      // Now send the aggregated data to the autopilot API
-      const autopilotFormData = new FormData()
-      // Create a single file from the aggregated data or use the first successful result
-      if (successfulResults.length > 0) {
-        // For now, we'll use the first file as representative
-        // In a real implementation, you might want to aggregate the data differently
-        const firstResult = successfulResults[0]
-        autopilotFormData.append('statusKey', statusKey)
-        // Add aggregated data as JSON
-        autopilotFormData.append('aggregatedData', JSON.stringify({
-          totalFiles: successfulResults.length,
-          results: successfulResults.map((result: any) => result.data)
-        }))
-      }
-
-      const autopilotResponse = await fetch('/api/advisor/autodetect', {
-        method: 'POST',
-        body: autopilotFormData
-      })
-
-      const autopilotData = await autopilotResponse.json()
-
-      if (autopilotResponse.ok) {
-        if (autopilotData.message) {
-          setMessage(autopilotData.message)
-          setShowDeductions(false)
-        } else if (Array.isArray(autopilotData)) {
-          setDeductions(autopilotData)
-          setShowDeductions(true)
-          setMessage('')
-        }
-      } else {
-        setMessage(autopilotData.error || 'An error occurred during autopilot processing')
+      if (data.message) {
+        setMessage(data.message)
         setShowDeductions(false)
+      } else if (Array.isArray(data)) {
+        setDeductions(data)
+        setShowDeductions(true)
+        setMessage('')
+      } else {
+        throw new Error('Unexpected response format from autopilot API')
       }
 
     } catch (error) {
