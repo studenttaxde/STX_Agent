@@ -12,6 +12,20 @@ import {
   getSuggestedDeductions 
 } from '@/lib/supabaseService'
 
+// Generate a simple user ID based on browser fingerprint or create a new one
+const generateUserId = (): string => {
+  // Try to get existing user ID from localStorage
+  let userId = localStorage.getItem('stx_user_id')
+  
+  if (!userId) {
+    // Create a new user ID
+    userId = 'user_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
+    localStorage.setItem('stx_user_id', userId)
+  }
+  
+  return userId
+}
+
 export default function TaxAdvisorApp() {
   const [state, setState] = useState<TaxAdvisorState>({
     messages: [],
@@ -30,6 +44,7 @@ export default function TaxAdvisorApp() {
   const [existingData, setExistingData] = useState<any>(null)
   const [suggestedDeductions, setSuggestedDeductions] = useState<any[]>([])
   const [showExistingDataModal, setShowExistingDataModal] = useState(false)
+  const [userId, setUserId] = useState<string>('')
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
@@ -40,14 +55,16 @@ export default function TaxAdvisorApp() {
     }
   }, [state.messages])
 
-  // Load existing data when component mounts
+  // Initialize user ID and load existing data when component mounts
   useEffect(() => {
-    loadExistingData()
+    const id = generateUserId()
+    setUserId(id)
+    loadExistingData(id)
   }, [])
 
-  const loadExistingData = async () => {
+  const loadExistingData = async (id: string) => {
     try {
-      const filings = await getTaxFilings()
+      const filings = await getTaxFilings(id)
       if (filings.length > 0) {
         setExistingData(filings)
       }
@@ -58,9 +75,9 @@ export default function TaxAdvisorApp() {
 
   const checkExistingDataForYear = async (year: number) => {
     try {
-      const hasData = await hasExistingData(year)
+      const hasData = await hasExistingData(userId, year)
       if (hasData) {
-        const existingFiling = await getTaxFilingByYear(year)
+        const existingFiling = await getTaxFilingByYear(userId, year)
         if (existingFiling) {
           setShowExistingDataModal(true)
           return existingFiling
@@ -197,7 +214,7 @@ export default function TaxAdvisorApp() {
       }))
 
       // Load suggested deductions for this year
-      const suggestions = await getSuggestedDeductions(yearNum)
+      const suggestions = await getSuggestedDeductions(userId, yearNum)
       setSuggestedDeductions(suggestions)
 
       // Initialize advisor with extracted data
@@ -271,6 +288,7 @@ export default function TaxAdvisorApp() {
         // Save data to Supabase when conversation is done
         if (data.done && state.extractedData) {
           await saveTaxFiling({
+            user_id: userId,
             year: parseInt(state.extractedData.year?.toString() || new Date().getFullYear().toString()),
             gross_income: state.extractedData.gross_income || 0,
             income_tax_paid: state.extractedData.income_tax_paid || 0,
