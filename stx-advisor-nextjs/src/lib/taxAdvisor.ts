@@ -619,9 +619,18 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
     const lastUserMessage = this.state.messages.slice().reverse().find(msg => msg.sender === 'user')?.text.toLowerCase();
     const lastAgentMessage = this.state.messages.slice().reverse().find(msg => msg.sender === 'assistant')?.text.toLowerCase();
 
+    console.log('=== TaxAdvisor Debug ===');
+    console.log('Last user message:', lastUserMessage);
+    console.log('Last agent message:', lastAgentMessage);
+    console.log('Messages count:', this.state.messages.length);
+    console.log('Current question index:', this.state.currentQuestionIndex);
+    console.log('Deduction flow:', this.state.deductionFlow ? 'set' : 'null');
+    console.log('Done state:', this.state.done);
+
     try {
       // Initial message: Display summary and confirm year
       if (this.state.messages.length === 0) {
+        console.log('Handling initial message');
         const summary = this.buildInitialSummary();
         this.addAgentMessage(summary);
 
@@ -639,6 +648,7 @@ If this is correct, I'll help you with your tax filing process. If not, please u
       
       // Handle year confirmation
       if (lastAgentMessage && lastAgentMessage.includes('confirm that the tax year')) {
+        console.log('Handling year confirmation');
         if (lastUserMessage && /^(yes|y|yeah|correct|right)$/i.test(lastUserMessage)) {
           const year = this.state.extractedData?.year;
           if (year) {
@@ -652,6 +662,7 @@ If this is correct, I'll help you with your tax filing process. If not, please u
           
           // Check threshold after year confirmation
           if (this.isBelowThreshold()) {
+            console.log('Below threshold, showing early exit');
             const summary = this.earlyExitSummary();
             const finalMsg = `${summary}\n\nWould you like to file a tax return for another year?`;
             this.addAgentMessage(finalMsg);
@@ -660,6 +671,7 @@ If this is correct, I'll help you with your tax filing process. If not, please u
           }
           
           // If not below threshold, ask for status
+          console.log('Above threshold, asking for status');
           const nextQuestion = `Since your income exceeds the tax-free threshold, let's check for deductible expenses to reduce your taxable income.
 
 Please select your status for the year:
@@ -679,6 +691,7 @@ Please select your status for the year:
       
       // Handle status selection
       if (lastAgentMessage && (lastAgentMessage.includes('select your status for the year') || lastAgentMessage.includes('Please select your status'))) {
+        console.log('Handling status selection');
         let status: UserStatus | null = null;
         
         // Handle numeric input (1, 2, 3, 4)
@@ -697,6 +710,7 @@ Please select your status for the year:
         }
         
         if (status) {
+          console.log('Status selected:', status);
           this.state.deductionFlow = this.deductionFlowMap[status];
           this.state.currentQuestionIndex = 0;
           
@@ -719,6 +733,7 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
       
       // Handle "file for another year" response
       if (lastAgentMessage && lastAgentMessage.includes('file a tax return for another year')) {
+        console.log('Handling file another year response');
         if (lastUserMessage && /^(yes|y|yeah|sure|ok)$/i.test(lastUserMessage)) {
           this.resetForNewYear();
           const result = "Great! Please upload the PDF for the new year you want to file.";
@@ -733,9 +748,11 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
       // Handle deduction questions
       const currentQuestion = this.getCurrentQuestion();
       if (currentQuestion && lastAgentMessage && lastAgentMessage.includes(currentQuestion.question)) {
+        console.log('Handling deduction question:', currentQuestion.question);
         const deductionAnswer = this.processDeductionAnswer(lastUserMessage || '');
         
         if (deductionAnswer) {
+          console.log('Deduction answer processed:', deductionAnswer);
           this.state.deductionAnswers[deductionAnswer.questionId] = deductionAnswer;
           this.state.currentQuestionIndex++;
           
@@ -748,6 +765,7 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
             return nextMsg;
           } else {
             // All questions answered, generate final summary
+            console.log('All questions answered, generating final summary');
             const summary = this.generateFinalSummary();
             const finalMsg = `${summary}\n\nWould you like to file a tax return for another year?`;
             this.addAgentMessage(finalMsg);
@@ -762,6 +780,7 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
       
       // Handle complex responses with multiple amounts
       if (lastUserMessage && lastUserMessage.includes('for') && /\d+/.test(lastUserMessage)) {
+        console.log('Handling complex response with amounts');
         const deductionAnswer = this.processDeductionAnswer(lastUserMessage);
         if (deductionAnswer && deductionAnswer.answer) {
           this.state.deductionAnswers[deductionAnswer.questionId] = deductionAnswer;
@@ -786,44 +805,17 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
         }
       }
       
-      // Fallback: Use LangChain agent for complex queries
-      try {
-        if (!this.agentExecutor) {
-          await this.initializeAgent();
-        }
-        
-        const context = {
-          extractedData: this.state.extractedData,
-          deductionAnswers: this.state.deductionAnswers,
-          currentQuestion: this.getCurrentQuestion(),
-          filedSummaries: this.state.filedSummaries,
-          lastUserMessage: lastUserMessage || '',
-          lastAgentMessage: lastAgentMessage || ''
-        };
-        
-        const response = await this.agentExecutor!.invoke({ 
-          input: lastUserMessage || '' 
-        });
-        
-        const reply = response.output || 'I apologize, but I need more information to help you properly. Could you please provide more details about your tax situation?';
-        
-        // Check if the reply indicates a summary or conclusion
-        if (reply.toLowerCase().includes('summary') || reply.toLowerCase().includes('conclusion') || reply.toLowerCase().includes('final')) {
-          this.state.done = true;
-        }
-        
-        this.addAgentMessage(reply);
-        return reply;
-        
-      } catch (error) {
-        console.error('Error in agent conversation:', error);
-        const fallbackMsg = "I'm having trouble processing your request. Could you please rephrase your question or provide more specific details about what you need help with?";
-        this.addAgentMessage(fallbackMsg);
-        return fallbackMsg;
-      }
+      // Simple fallback for unrecognized responses
+      console.log('No specific handler found, using fallback');
+      const fallbackMsg = "I didn't understand your response. Please provide a specific amount (e.g., '500') or type 'n/a' if this doesn't apply to you. You can also restart the conversation by uploading a new PDF.";
+      this.addAgentMessage(fallbackMsg);
+      return fallbackMsg;
+      
     } catch (error) {
       console.error('Error in nextAdvisorMessage:', error);
-      return "I encountered an error. Please try again.";
+      const errorMsg = "I encountered an error. Please try uploading your PDF again or restart the conversation.";
+      this.addAgentMessage(errorMsg);
+      return errorMsg;
     }
   }
 
