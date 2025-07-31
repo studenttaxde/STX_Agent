@@ -92,17 +92,19 @@ def parse_german_tax_document(text: str) -> dict:
     }
     
     try:
-        # Extract year from text
-        year_match = re.search(r'Veranlagungszeitraum:\s*(\d{4})', text)
+        # Extract year from text - look for "20.21" format and convert to 2021
+        year_match = re.search(r'Veranlagungszeitraum:\s*(\d{2})\.(\d{2})', text)
         if year_match:
-            result["year"] = int(year_match.group(1))
+            # Convert "20.21" to 2021
+            year_str = f"20{year_match.group(2)}"  # Use the second group (21) and prepend 20
+            result["year"] = int(year_str)
         
-        # Extract employer
-        employer_match = re.search(r'Arbeitgeber\s+Name des Arbeitgebers\s+([^\n]+)', text)
+        # Extract employer - look for the pattern more precisely
+        employer_match = re.search(r'Arbeitgeber\s+Name des Arbeitgebers\s+([A-Za-z\s]+?)(?=\s+Betroffenes Jahr|$)', text)
         if employer_match:
             result["employer"] = employer_match.group(1).strip()
         
-        # Extract name (Identifikationsnummer)
+        # Extract name (Identifikationsnummer) - get the full number
         name_match = re.search(r'Identifikationsnummer\s+(\d+\s+\d+\s+\d+)', text)
         if name_match:
             result["name"] = f"User {name_match.group(1)}"
