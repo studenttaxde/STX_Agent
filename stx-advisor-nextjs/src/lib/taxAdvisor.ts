@@ -747,34 +747,47 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
       
       // Handle deduction questions
       const currentQuestion = this.getCurrentQuestion();
-      if (currentQuestion && lastAgentMessage && lastAgentMessage.includes(currentQuestion.question)) {
+      if (currentQuestion && this.state.deductionFlow && this.state.currentQuestionIndex < this.state.deductionFlow.questions.length) {
         console.log('Handling deduction question:', currentQuestion.question);
-        const deductionAnswer = this.processDeductionAnswer(lastUserMessage || '');
         
-        if (deductionAnswer) {
-          console.log('Deduction answer processed:', deductionAnswer);
-          this.state.deductionAnswers[deductionAnswer.questionId] = deductionAnswer;
-          this.state.currentQuestionIndex++;
+        // Check if the last agent message was asking for an amount or if we're in deduction flow
+        const isAskingForAmount = lastAgentMessage && (
+          lastAgentMessage.includes('provide the amount') ||
+          lastAgentMessage.includes('type "n/a"') ||
+          lastAgentMessage.includes('doesn\'t apply to you') ||
+          lastAgentMessage.includes('specific amount')
+        );
+        
+        if (isAskingForAmount || this.state.currentQuestionIndex > 0) {
+          const deductionAnswer = this.processDeductionAnswer(lastUserMessage || '');
           
-          const nextQuestion = this.getCurrentQuestion();
-          if (nextQuestion) {
-            const nextMsg = `**${nextQuestion.question}**
+          if (deductionAnswer) {
+            console.log('Deduction answer processed:', deductionAnswer);
+            this.state.deductionAnswers[deductionAnswer.questionId] = deductionAnswer;
+            this.state.currentQuestionIndex++;
+            
+            const nextQuestion = this.getCurrentQuestion();
+            if (nextQuestion) {
+              const nextMsg = `Great! I've recorded €${deductionAnswer.amount} for ${deductionAnswer.details}.
+
+**${nextQuestion.question}**
 
 Please provide the amount or type "n/a" if this doesn't apply to you.`;
-            this.addAgentMessage(nextMsg);
-            return nextMsg;
+              this.addAgentMessage(nextMsg);
+              return nextMsg;
+            } else {
+              // All questions answered, generate final summary
+              console.log('All questions answered, generating final summary');
+              const summary = this.generateFinalSummary();
+              const finalMsg = `${summary}\n\nWould you like to file a tax return for another year?`;
+              this.addAgentMessage(finalMsg);
+              this.state.done = true;
+              return finalMsg;
+            }
           } else {
-            // All questions answered, generate final summary
-            console.log('All questions answered, generating final summary');
-            const summary = this.generateFinalSummary();
-            const finalMsg = `${summary}\n\nWould you like to file a tax return for another year?`;
-            this.addAgentMessage(finalMsg);
-            this.state.done = true;
-            return finalMsg;
+            const result = "I couldn't understand your response. Please provide a specific amount (e.g., '500') or type 'n/a' if this doesn't apply to you.";
+            return result;
           }
-        } else {
-          const result = "I couldn't understand your response. Please provide a specific amount (e.g., '500') or type 'n/a' if this doesn't apply to you.";
-          return result;
         }
       }
       
