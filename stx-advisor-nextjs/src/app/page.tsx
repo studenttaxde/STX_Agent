@@ -207,9 +207,13 @@ function AdvisorChat() {
         console.log('Result data keys:', Object.keys(resultData))
         console.log('Result data values:', Object.values(resultData))
 
-        // Aggregate income
-        if (resultData.bruttoarbeitslohn) {
-          aggregatedData.totalIncome += parseFloat(resultData.bruttoarbeitslohn) || 0
+        // Aggregate income - check multiple possible field names
+        const income = resultData.bruttolohn || resultData.bruttoarbeitslohn || resultData.gross_income || 0
+        console.log(`Income for ${result.filename}:`, income, 'Type:', typeof income)
+        if (income) {
+          const parsedIncome = parseFloat(income) || 0
+          aggregatedData.totalIncome += parsedIncome
+          console.log(`Added ${parsedIncome} to total. New total: ${aggregatedData.totalIncome}`)
         }
 
         // Collect employers
