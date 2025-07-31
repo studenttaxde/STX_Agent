@@ -11,6 +11,8 @@ import {
   hasExistingData,
   getSuggestedDeductions 
 } from '@/lib/supabaseService'
+import Tabs from '@/components/Tabs'
+import AutopilotFlow from './autopilot/page'
 
 // Generate a simple user ID based on browser fingerprint or create a new one
 const generateUserId = (): string => {
@@ -26,7 +28,8 @@ const generateUserId = (): string => {
   return userId
 }
 
-export default function TaxAdvisorApp() {
+// Advisor Chat Component
+function AdvisorChat() {
   const [state, setState] = useState<TaxAdvisorState>({
     messages: [],
     loading: false,
@@ -362,10 +365,12 @@ export default function TaxAdvisorApp() {
   }
 
   const handleUserResponse = async (message: string) => {
+    if (!message.trim()) return
+
+    // Add user message to chat
     setState(prev => ({
       ...prev,
-      messages: [...prev.messages, { sender: 'user', text: message }],
-      loading: true
+      messages: [...prev.messages, { sender: 'user', text: message }]
     }))
 
     try {
@@ -375,120 +380,111 @@ export default function TaxAdvisorApp() {
         body: JSON.stringify({
           action: 'respond',
           sessionId: 'default',
-          message: message,
-          extractedData: state.extractedData
+          message: message
         })
       })
 
       if (response.ok) {
         const data = await response.json()
         
+        if (data.success) {
           setState(prev => ({
             ...prev,
-          messages: [...prev.messages, { sender: 'assistant', text: data.message }],
-          loading: false,
-          deductionAnswers: data.deduction_answers || prev.deductionAnswers,
-          taxCalculation: data.tax_calculation || prev.taxCalculation,
-          deductionFlow: data.deduction_flow || prev.deductionFlow,
-          done: data.done || false
-        }))
-
-        // Save data to Supabase when conversation is done
-        if (data.done && state.extractedData) {
-          await saveTaxFiling({
-            user_id: userId,
-            year: parseInt(state.extractedData.year?.toString() || new Date().getFullYear().toString()),
-            gross_income: state.extractedData.gross_income || 0,
-            income_tax_paid: state.extractedData.income_tax_paid || 0,
-            employer: state.extractedData.employer || 'Unknown',
-            full_name: state.extractedData.full_name || 'User',
-            taxable_income: data.tax_calculation?.taxableIncome,
-            refund: data.tax_calculation?.refund,
-            deductions: data.deduction_answers || {}
-          })
+            messages: [...prev.messages, { sender: 'assistant', text: data.message }],
+            done: data.done || false,
+            deductionFlow: data.deduction_flow || null,
+            currentQuestionIndex: data.current_question_index || 0,
+            deductionAnswers: data.deduction_answers || {},
+            taxCalculation: data.tax_calculation || null
+          }))
+        } else {
+          setState(prev => ({
+            ...prev,
+            messages: [...prev.messages, { sender: 'assistant', text: 'Sorry, I encountered an error. Please try again.' }]
+          }))
         }
+      } else {
+        setState(prev => ({
+          ...prev,
+          messages: [...prev.messages, { sender: 'assistant', text: 'Sorry, I encountered an error. Please try again.' }]
+        }))
       }
     } catch (error) {
-      console.error('Advisor error:', error)
-      setState(prev => ({ ...prev, loading: false }))
+      console.error('Error sending message:', error)
+      setState(prev => ({
+        ...prev,
+        messages: [...prev.messages, { sender: 'assistant', text: 'Sorry, I encountered an error. Please try again.' }]
+      }))
     }
   }
 
   const handleFileAnotherYear = () => {
-    setState({
-      messages: [],
-      loading: false,
+    setState(prev => ({
+      ...prev,
       step: 'upload',
+      messages: [],
       extractedData: null,
       multiPDFData: null,
-      filedSummaries: [...state.filedSummaries, {
-        year: (state.extractedData?.year || new Date().getFullYear()).toString(),
-        summary: state.taxCalculation || { taxableIncome: 0, refund: 0 },
-        deductions: state.deductionAnswers
-      }],
       deductionAnswers: {},
       currentQuestionIndex: 0,
       deductionFlow: null,
       taxCalculation: null,
       done: false
-    })
+    }))
+    setShowExistingDataModal(false)
   }
 
   const handleUseExistingData = async (existingFiling: any) => {
-    setShowExistingDataModal(false)
-    
-    // Pre-fill the form with existing data
-    setState(prev => ({
-      ...prev,
-      extractedData: {
-        year: existingFiling.year,
-        gross_income: existingFiling.gross_income,
-        income_tax_paid: existingFiling.income_tax_paid,
-        employer: existingFiling.employer,
-        full_name: existingFiling.full_name
-      },
-      multiPDFData: {
-        totalFiles: 1,
-        results: [],
-        summary: {
-          year: existingFiling.year,
-          grossIncome: existingFiling.gross_income,
-          incomeTaxPaid: existingFiling.income_tax_paid,
-          employer: existingFiling.employer,
-          fullName: existingFiling.full_name
-        }
-      },
-      step: 'advisor',
-      deductionAnswers: existingFiling.deductions || {}
-    }))
-
-    // Initialize advisor with existing data
-    const advisorResponse = await fetch('/api/advisor', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        action: 'initialize',
-        sessionId: 'default',
+    try {
+      setState(prev => ({
+        ...prev,
+        step: 'advisor',
         extractedData: {
           year: existingFiling.year,
           gross_income: existingFiling.gross_income,
           income_tax_paid: existingFiling.income_tax_paid,
+          solidaritaetszuschlag: existingFiling.solidarity_tax || 0,
           employer: existingFiling.employer,
           full_name: existingFiling.full_name
-        },
-        existingData: existingFiling,
-        suggestedDeductions: suggestedDeductions
-      })
-    })
-
-    if (advisorResponse.ok) {
-      const advisorData = await advisorResponse.json()
-      setState(prev => ({
-        ...prev,
-        messages: [
-          { sender: 'assistant', text: advisorData.message }
-        ]
+        }
       }))
+
+      const deductions = await getSuggestedDeductions(userId, existingFiling.year)
+      setSuggestedDeductions(deductions)
+
+      const advisorResponse = await fetch('/api/advisor', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'initialize',
+          sessionId: 'default',
+          extractedData: {
+            year: existingFiling.year,
+            gross_income: existingFiling.gross_income,
+            income_tax_paid: existingFiling.income_tax_paid,
+            solidaritaetszuschlag: existingFiling.solidarity_tax || 0,
+            employer: existingFiling.employer,
+            full_name: existingFiling.full_name
+          },
+          existingData: existingFiling,
+          suggestedDeductions: deductions
+        })
+      })
+
+      if (advisorResponse.ok) {
+        const advisorData = await advisorResponse.json()
+        setState(prev => ({
+          ...prev,
+          messages: [
+            { sender: 'assistant', text: advisorData.message }
+          ]
+        }))
+      }
+
+      setShowExistingDataModal(false)
+    } catch (error) {
+      console.error('Error using existing data:', error)
+      setShowExistingDataModal(false)
     }
   }
 
@@ -496,373 +492,179 @@ export default function TaxAdvisorApp() {
     setShowExistingDataModal(false)
   }
 
-  // Helper function to format currency
   const formatCurrency = (amount: number | string | undefined) => {
-    if (amount === undefined || amount === null) return '€0.00'
+    if (amount === undefined || amount === null) return '€0,00'
     const num = typeof amount === 'string' ? parseFloat(amount) : amount
-    return `€${num.toFixed(2)}`
+    return `€${num.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
   }
 
-  // Helper function to get unique employers
   const getUniqueEmployers = () => {
     if (!state.multiPDFData?.results) return []
     const employers = state.multiPDFData.results
-      .map(result => result.employer)
-      .filter(Boolean)
+      .map((result: any) => result.employer)
+      .filter((employer: string) => employer && employer !== 'Unknown')
     return [...new Set(employers)]
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
-      <div className="container mx-auto px-4 py-8">
-        <div className="max-w-6xl mx-auto">
-      {/* Header */}
-          <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold text-gray-900 mb-2">
-              German Tax Advisor
-            </h1>
-            <p className="text-gray-600">
-              Upload your tax documents and get personalized advice
-            </p>
-            </div>
-
-          {/* Existing Data Modal */}
-          {showExistingDataModal && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-xl p-6 max-w-md w-full mx-4">
-                <h3 className="text-xl font-bold text-gray-900 mb-4">
-                  📋 Existing Data Found
-                </h3>
-                <p className="text-gray-600 mb-6">
-                  We found existing tax data for this year. Would you like to use it as a starting point?
-                </p>
-                <div className="flex space-x-4">
-                  <button
-                    onClick={() => handleUseExistingData(existingData)}
-                    className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    Use Existing Data
-                  </button>
-                  <button
-                    onClick={handleStartNew}
-                    className="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition-colors"
-                  >
-                    Start New
-                  </button>
-            </div>
-          </div>
-        </div>
-          )}
-
-          {/* File Upload Section */}
-          {state.step === 'upload' && (
-            <div className="bg-white rounded-xl shadow-lg p-8 mb-8">
-              <div className="text-center">
-                <div className="mb-6">
-                  <svg className="mx-auto h-16 w-16 text-blue-500" stroke="currentColor" fill="none" viewBox="0 0 48 48">
-                    <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
-                
-                {state.loading ? (
-                  <div className="mb-6">
-                    <div className="flex items-center justify-center mb-4">
-                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                    </div>
-                    <div className="space-y-4">
-                      <h3 className="text-lg font-semibold text-gray-900">Processing Your Documents</h3>
-                      <p className="text-gray-600">{processingStatus || 'Extracting tax information from your PDF files...'}</p>
-                      
-                      {/* Progress Bar */}
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div className="bg-gradient-to-r from-blue-500 to-purple-600 h-2 rounded-full animate-pulse" style={{ width: '60%' }}></div>
-                      </div>
-                      
-                      <div className="flex items-center justify-center space-x-2 text-sm text-gray-500">
-                        <div className="flex space-x-1">
-                          <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
-                          <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                          <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                        </div>
-                        <span>This may take a few moments</span>
-                      </div>
-                </div>
-              </div>
-                ) : (
-                  <div className="mb-6">
-                    <label htmlFor="file-upload" className="cursor-pointer bg-gradient-to-r from-blue-600 to-purple-600 text-white px-8 py-4 rounded-xl hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-semibold text-lg shadow-lg">
-                      Choose PDF Files
-                    </label>
-                    <input
-                      id="file-upload"
-                      ref={fileInputRef}
-                      type="file"
-                      multiple
-                      accept=".pdf"
-                      onChange={(e) => e.target.files && handleFileUpload(e.target.files)}
-                      className="hidden"
-                    />
+    <div className="max-w-4xl mx-auto p-6">
+      <div className="bg-white shadow rounded-lg">
+        {state.step === 'upload' && (
+          <div className="p-6">
+            <h2 className="text-2xl font-bold text-gray-900 mb-6">German Tax Advisor</h2>
+            
+            <div className="mb-6">
+              <label htmlFor="file-upload" className="block text-sm font-medium text-gray-700 mb-2">
+                Upload your German tax documents (PDF)
+              </label>
+              <input
+                ref={fileInputRef}
+                type="file"
+                id="file-upload"
+                multiple
+                accept=".pdf"
+                onChange={(e) => e.target.files && handleFileUpload(e.target.files)}
+                className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+              />
+              {state.loading && (
+                <div className="mt-4">
+                  <div className="flex items-center space-x-2">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    <span className="text-sm text-gray-600">{processingStatus}</span>
                   </div>
-                )}
-                
-                <p className="text-gray-500">
-                  {state.loading ? 'Please wait while we analyze your documents...' : 'Upload your German tax documents (Lohnsteuerbescheinigung, etc.)'}
-                </p>
-              </div>
+                  <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
+                    <div className="bg-blue-600 h-2 rounded-full animate-pulse"></div>
+                  </div>
                 </div>
               )}
-              
-          {/* Document Analysis Summary - Only show once after upload */}
-          {state.multiPDFData && state.step === 'advisor' && (
-            <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900">
-                    📊 Document Analysis
-                  </h2>
-                  <p className="text-gray-600">
-                    {state.multiPDFData.totalFiles} document{state.multiPDFData.totalFiles !== 1 ? 's' : ''} processed successfully
-                  </p>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm text-gray-500">Tax Year</div>
-                  <div className="text-xl font-bold text-blue-600">
-                    {state.multiPDFData.summary.year}
-                  </div>
-                </div>
-              </div>
+            </div>
 
-              {/* Key Metrics */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-                <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-6 border border-blue-200">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-sm font-medium text-blue-600 mb-1">Total Income</div>
-                      <div className="text-3xl font-bold text-blue-900">
-                        {formatCurrency(state.multiPDFData.summary.grossIncome)}
-                      </div>
-                    </div>
-                    <div className="text-blue-400">
-                      <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z"/>
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clipRule="evenodd"/>
-                      </svg>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-xl p-6 border border-red-200">
-                      <div className="flex items-center justify-between">
-                        <div>
-                      <div className="text-sm font-medium text-red-600 mb-1">Tax Paid</div>
-                      <div className="text-3xl font-bold text-red-900">
-                        {formatCurrency(state.multiPDFData.summary.incomeTaxPaid)}
-                      </div>
-                    </div>
-                    <div className="text-red-400">
-                      <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd"/>
-                      </svg>
-                        </div>
-                      </div>
-                    </div>
-
-                <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-6 border border-green-200">
-                      <div className="flex items-center justify-between">
-                        <div>
-                      <div className="text-sm font-medium text-green-600 mb-1">Employer</div>
-                      <div className="text-lg font-bold text-green-900 truncate">
-                        {state.multiPDFData.summary.employer || 'Multiple Employers'}
-                      </div>
-                    </div>
-                    <div className="text-green-400">
-                      <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v3h8v-3z"/>
-                      </svg>
-                    </div>
-                  </div>
-                </div>
-                        </div>
-                        
-              {/* Document Details - Collapsible */}
-              {state.multiPDFData.results && state.multiPDFData.results.length > 1 && (
-                <details className="bg-gray-50 rounded-xl p-4">
-                  <summary className="cursor-pointer font-semibold text-gray-700 hover:text-gray-900 flex items-center">
-                    <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    View Individual Documents ({state.multiPDFData.results.length} files)
-                  </summary>
-                  <div className="mt-4 space-y-3">
-                    {state.multiPDFData.results.map((result: any, index: number) => (
-                      <div key={index} className="bg-white rounded-lg border border-gray-200 p-4">
-                        <div className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <div className="font-semibold text-gray-900 mb-1">
-                              {result.name || `Document ${index + 1}`}
-                              </div>
-                            <div className="text-sm text-gray-600 space-y-1">
-                              {result.time_period_from && result.time_period_to && (
-                                <div>Period: {result.time_period_from} - {result.time_period_to}</div>
-                              )}
-                              {result.employer && (
-                                <div>Employer: {result.employer}</div>
-                              )}
-                              </div>
-                          </div>
-                          <div className="text-right ml-4">
-                            <div className="text-sm font-medium text-gray-900">
-                              {formatCurrency(result.bruttolohn)}
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              Tax: {formatCurrency(result.lohnsteuer)}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </details>
-              )}
-                </div>
-          )}
-
-          {/* Chat Interface */}
-          {state.step === 'advisor' && (
-            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
-              <div className="bg-gradient-to-r from-blue-600 to-purple-600 px-6 py-4">
-                <h2 className="text-xl font-semibold text-white flex items-center">
-                  <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                  </svg>
-                  Tax Advisor Chat
-                </h2>
-              </div>
-
-              <div className="flex flex-col h-96">
-                <div 
-                  ref={chatContainerRef}
-                  className="flex-1 overflow-y-auto px-6 py-6 space-y-4" 
-                  style={{ maxHeight: 'calc(100vh - 300px)' }}
-                >
-                  {state.messages && state.messages.length > 0 && state.messages.map((message, index) => (
-                    <div
-                      key={index}
-                      className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
-                    >
-                      <div
-                        className={`max-w-[85%] px-6 py-4 rounded-2xl ${
-                          message.sender === 'user'
-                            ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
-                            : 'bg-gray-50 text-gray-800 border border-gray-200'
-                        }`}
-                      >
-                        <div className="whitespace-pre-wrap leading-relaxed">{message.text}</div>
-                      </div>
+            {existingData && existingData.length > 0 && (
+              <div className="mt-6 p-4 bg-blue-50 rounded-md">
+                <h3 className="text-sm font-medium text-blue-900 mb-2">Previous Filings</h3>
+                <div className="space-y-2">
+                  {existingData.map((filing: any, index: number) => (
+                    <div key={index} className="text-sm text-blue-800">
+                      {filing.year}: {formatCurrency(filing.gross_income)} - {filing.employer}
                     </div>
                   ))}
-                  {state.loading && (
-                    <div className="flex justify-start">
-                      <div className="bg-gray-50 text-gray-800 border border-gray-200 px-6 py-4 rounded-2xl">
-                        <div className="flex items-center space-x-3">
-                          <div className="flex space-x-1">
-                            <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"></div>
-                            <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                            <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                          </div>
-                          <span className="text-sm text-gray-600">Processing...</span>
-                        </div>
-                  </div>
                 </div>
-              )}
-                </div>
+              </div>
+            )}
+          </div>
+        )}
 
-                {!state.done && (
-                  <div className="border-t border-gray-200 p-6">
-                <form
-                  onSubmit={(e) => {
-                        e.preventDefault()
-                        const input = e.currentTarget.elements.namedItem('message') as HTMLInputElement
-                    if (input.value.trim()) {
-                          handleUserResponse(input.value.trim())
-                          input.value = ''
-                    }
-                  }}
-                  className="flex space-x-4"
+        {state.step === 'advisor' && (
+          <div className="flex flex-col h-96">
+            <div className="flex-1 overflow-y-auto p-6" ref={chatContainerRef}>
+              {state.messages.map((message, index) => (
+                <div
+                  key={index}
+                  className={`mb-4 ${
+                    message.sender === 'user' ? 'text-right' : 'text-left'
+                  }`}
                 >
-                  <input
-                    type="text"
-                        name="message"
-                        placeholder="Type your response..."
-                        className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                    disabled={state.loading}
-                  />
-                  <button
-                    type="submit"
-                    disabled={state.loading}
-                        className="px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 transition-all duration-200 font-semibold"
+                  <div
+                    className={`inline-block max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+                      message.sender === 'user'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 text-gray-800'
+                    }`}
                   >
-                        Send
-                  </button>
-                </form>
+                    {message.text}
                   </div>
-                )}
-                  
-                {state.done && (
-                  <div className="border-t border-gray-200 p-6">
-                  <button
-                    onClick={handleFileAnotherYear}
-                      className="w-full px-8 py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all duration-200 font-semibold text-lg"
-                  >
-                      File for Another Year
-                  </button>
                 </div>
-              )}
+              ))}
+            </div>
+            
+            <div className="border-t p-4">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  const input = e.currentTarget.elements.namedItem('message') as HTMLInputElement
+                  if (input.value.trim()) {
+                    handleUserResponse(input.value)
+                    input.value = ''
+                  }
+                }}
+                className="flex space-x-2"
+              >
+                <input
+                  type="text"
+                  name="message"
+                  placeholder="Type your message..."
+                  className="flex-1 border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <button
+                  type="submit"
+                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                >
+                  Send
+                </button>
+              </form>
             </div>
           </div>
-          )}
+        )}
+      </div>
 
-          {/* Previous Filings - Only show if there are any */}
-          {state.filedSummaries && state.filedSummaries.length > 0 && (
-            <div className="bg-white rounded-xl shadow-lg p-6 mt-8">
-              <h3 className="text-xl font-semibold text-gray-900 mb-6 flex items-center">
-                <svg className="w-6 h-6 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                Previous Filings
+      {/* Existing Data Modal */}
+      {showExistingDataModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3 text-center">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">
+                Existing Filing Found
               </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {state.filedSummaries.map((summary, index) => (
-                  <div key={index} className="bg-gradient-to-br from-gray-50 to-gray-100 rounded-xl p-4 border border-gray-200">
-                    <div className="flex justify-between items-start mb-3">
-                      <div className="text-lg font-bold text-gray-900">
-                        Year {summary.year}
-                      </div>
-                      <div className="text-sm text-gray-500">
-                        #{index + 1}
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Taxable Income:</span>
-                        <span className="font-semibold text-gray-900">
-                          {formatCurrency(summary.summary.taxableIncome)}
-                        </span>
-                      </div>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-600">Refund:</span>
-                        <span className="font-semibold text-green-600">
-                          {formatCurrency(summary.summary.refund)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+              <p className="text-sm text-gray-500 mb-6">
+                We found an existing filing for this year. Would you like to use it or start fresh?
+              </p>
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => handleUseExistingData(existingData.find((f: any) => f.year === state.extractedData?.year))}
+                  className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
+                >
+                  Use Existing
+                </button>
+                <button
+                  onClick={handleStartNew}
+                  className="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400"
+                >
+                  Start Fresh
+                </button>
               </div>
             </div>
-          )}
+          </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+export default function TaxAdvisorApp() {
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-7xl mx-auto py-8">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">STX Tax Advisor</h1>
+          <p className="text-gray-600">Your AI-powered German tax filing assistant</p>
         </div>
+        
+        <Tabs 
+          tabs={[
+            { 
+              key: 'advisor', 
+              label: 'Advisor', 
+              content: <AdvisorChat />
+            },
+            { 
+              key: 'autopilot', 
+              label: 'Autopilot', 
+              content: <AutopilotFlow />
+            }
+          ]}
+          defaultTab="advisor"
+        />
+      </div>
     </div>
   )
 }
