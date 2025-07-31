@@ -45,6 +45,7 @@ export default function TaxAdvisorApp() {
   const [suggestedDeductions, setSuggestedDeductions] = useState<any[]>([])
   const [showExistingDataModal, setShowExistingDataModal] = useState(false)
   const [userId, setUserId] = useState<string>('')
+  const [processingStatus, setProcessingStatus] = useState<string>('')
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
@@ -94,12 +95,15 @@ export default function TaxAdvisorApp() {
     if (!files || files.length === 0) return
 
     setState(prev => ({ ...prev, loading: true }))
+    setProcessingStatus('Preparing files for upload...')
 
     try {
       const formData = new FormData()
       Array.from(files).forEach(file => {
         formData.append('files', file)
       })
+
+      setProcessingStatus('Uploading files to server...')
 
       // Add retry logic for production timeouts
       let response: Response | undefined
@@ -108,6 +112,7 @@ export default function TaxAdvisorApp() {
 
       while (retryCount <= maxRetries) {
         try {
+          setProcessingStatus(`Processing documents... (attempt ${retryCount + 1}/${maxRetries + 1})`)
           response = await fetch('/api/extract-pdfs', {
             method: 'POST',
             body: formData
@@ -118,10 +123,13 @@ export default function TaxAdvisorApp() {
           if (retryCount > maxRetries) {
             throw new Error('Request failed after multiple attempts. Please try again.')
           }
+          setProcessingStatus(`Retrying... (attempt ${retryCount + 1}/${maxRetries + 1})`)
           // Wait before retrying
           await new Promise(resolve => setTimeout(resolve, 1000 * retryCount))
         }
       }
+
+      setProcessingStatus('Analyzing extracted data...')
 
       if (!response || !response.ok) {
         const errorData = await response?.json().catch(() => ({}))
@@ -135,6 +143,8 @@ export default function TaxAdvisorApp() {
       if (!data.success) {
         throw new Error(data.error || 'Extraction failed')
       }
+
+      setProcessingStatus('Processing results...')
 
       // Aggregate the results from successful extractions
       const successfulResults = data.results || []
@@ -194,79 +204,88 @@ export default function TaxAdvisorApp() {
         }
       })
 
+      setProcessingStatus('Finalizing analysis...')
+
       const aggregatedData = {
         year: parseInt(year) || new Date().getFullYear(),
         gross_income: totalGrossIncome,
         income_tax_paid: totalIncomeTaxPaid,
         solidaritaetszuschlag: totalSolidaritaetszuschlag,
         employer: employer || 'Unknown',
-        full_name: fullName || 'User',
-        results: successfulResults
+        full_name: fullName || 'User'
       }
-      
+
       console.log('Final aggregated data:', aggregatedData)
       console.log('Aggregated data keys:', Object.keys(aggregatedData))
       console.log('Aggregated data values:', Object.values(aggregatedData))
 
       // Check for existing data for this year
-      const yearNum = aggregatedData.year
-      const existingFiling = await checkExistingDataForYear(yearNum)
+      const existingFiling = await checkExistingDataForYear(aggregatedData.year)
+      
+      if (existingFiling) {
+        setState(prev => ({
+          ...prev,
+          loading: false,
+          extractedData: aggregatedData,
+          multiPDFData: {
+            totalFiles: successfulResults.length,
+            summary: {
+              year: aggregatedData.year,
+              grossIncome: aggregatedData.gross_income,
+              incomeTaxPaid: aggregatedData.income_tax_paid,
+              solidarityTax: aggregatedData.solidaritaetszuschlag,
+              employer: aggregatedData.employer,
+              fullName: aggregatedData.full_name
+            },
+            results: successfulResults.map((result: any) => result.data)
+          }
+        }))
+        setProcessingStatus('')
+        return
+      }
+
+      // Load suggested deductions
+      const deductions = await getSuggestedDeductions(userId, aggregatedData.year)
+      setSuggestedDeductions(deductions)
 
       setState(prev => ({
         ...prev,
+        loading: false,
+        step: 'advisor',
         extractedData: aggregatedData,
         multiPDFData: {
-          totalFiles: files.length,
-          results: successfulResults,
+          totalFiles: successfulResults.length,
           summary: {
-            year: aggregatedData.year.toString(),
+            year: aggregatedData.year,
             grossIncome: aggregatedData.gross_income,
             incomeTaxPaid: aggregatedData.income_tax_paid,
+            solidarityTax: aggregatedData.solidaritaetszuschlag,
             employer: aggregatedData.employer,
             fullName: aggregatedData.full_name
-          }
-        },
-        step: 'advisor',
-        loading: false
+          },
+          results: successfulResults.map((result: any) => result.data)
+        }
       }))
 
-      // Load suggested deductions for this year
-      const suggestions = await getSuggestedDeductions(userId, yearNum)
-      setSuggestedDeductions(suggestions)
-
-      // Initialize advisor with extracted data
-      const advisorResponse = await fetch('/api/advisor', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'initialize',
-          sessionId: 'default',
-          extractedData: aggregatedData,
-          existingData: existingFiling,
-          suggestedDeductions: suggestions
-        })
-      })
-
-      if (advisorResponse.ok) {
-        const advisorData = await advisorResponse.json()
-        setState(prev => ({
-          ...prev,
-          messages: [
-            { sender: 'assistant', text: advisorData.message }
-          ]
-        }))
-      }
+      setProcessingStatus('')
 
     } catch (error) {
-      console.error('Upload error:', error)
-      setState(prev => ({ 
-        ...prev, 
-        loading: false,
-        messages: [...prev.messages, { 
-          sender: 'assistant', 
-          text: `Error: ${error instanceof Error ? error.message : 'Upload failed'}. Please try again with smaller files or check your internet connection. If the problem persists, try uploading files one at a time.` 
-        }]
-      }))
+      console.error('Error processing files:', error)
+      setState(prev => ({ ...prev, loading: false }))
+      setProcessingStatus('')
+      
+      let errorMessage = 'Failed to process files. '
+      if (error instanceof Error) {
+        if (error.message.includes('timeout') || error.message.includes('Failed to fetch')) {
+          errorMessage += 'The request timed out. Please try again with fewer files or check your connection.'
+        } else if (error.message.includes('Extraction failed')) {
+          errorMessage += 'The PDF extraction failed. Please ensure your files are valid German tax documents.'
+        } else {
+          errorMessage += error.message
+        }
+      }
+      
+      alert(errorMessage)
     }
   }
 
@@ -472,22 +491,50 @@ export default function TaxAdvisorApp() {
                     <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </div>
-                <div className="mb-6">
-                  <label htmlFor="file-upload" className="cursor-pointer bg-gradient-to-r from-blue-600 to-purple-600 text-white px-8 py-4 rounded-xl hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-semibold text-lg shadow-lg">
-                    Choose PDF Files
-                  </label>
-                  <input
-                    id="file-upload"
-                    ref={fileInputRef}
-                    type="file"
-                    multiple
-                    accept=".pdf"
-                    onChange={(e) => e.target.files && handleFileUpload(e.target.files)}
-                    className="hidden"
-                  />
-                </div>
+                
+                {state.loading ? (
+                  <div className="mb-6">
+                    <div className="flex items-center justify-center mb-4">
+                      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+                    </div>
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold text-gray-900">Processing Your Documents</h3>
+                      <p className="text-gray-600">{processingStatus || 'Extracting tax information from your PDF files...'}</p>
+                      
+                      {/* Progress Bar */}
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div className="bg-gradient-to-r from-blue-500 to-purple-600 h-2 rounded-full animate-pulse" style={{ width: '60%' }}></div>
+                      </div>
+                      
+                      <div className="flex items-center justify-center space-x-2 text-sm text-gray-500">
+                        <div className="flex space-x-1">
+                          <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                          <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                          <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                        </div>
+                        <span>This may take a few moments</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-6">
+                    <label htmlFor="file-upload" className="cursor-pointer bg-gradient-to-r from-blue-600 to-purple-600 text-white px-8 py-4 rounded-xl hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-semibold text-lg shadow-lg">
+                      Choose PDF Files
+                    </label>
+                    <input
+                      id="file-upload"
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept=".pdf"
+                      onChange={(e) => e.target.files && handleFileUpload(e.target.files)}
+                      className="hidden"
+                    />
+                  </div>
+                )}
+                
                 <p className="text-gray-500">
-                  Upload your German tax documents (Lohnsteuerbescheinigung, etc.)
+                  {state.loading ? 'Please wait while we analyze your documents...' : 'Upload your German tax documents (Lohnsteuerbescheinigung, etc.)'}
                 </p>
               </div>
             </div>
