@@ -319,7 +319,19 @@ Your role is to:
 3. Calculate potential tax refunds
 4. Provide clear, helpful responses
 
-Always be professional, accurate, and helpful. Use the available tools to perform calculations.`],
+Current context:
+- Extracted data: ${JSON.stringify(this.state.extractedData)}
+- Deduction answers: ${JSON.stringify(this.state.deductionAnswers)}
+- Current question: ${this.getCurrentQuestion()?.question || 'None'}
+
+Important rules:
+- If user says "yes" to year confirmation, check if income is below tax-free threshold
+- If below threshold, provide early exit summary with full refund
+- If above threshold, ask for status (bachelor, master, new_employee, full_time)
+- For deduction questions, ask for specific amounts or "n/a"
+- Always be professional, accurate, and helpful
+
+Use the available tools to perform calculations.`],
       ['human', '{input}'],
       ['human', '{agent_scratchpad}']
     ]);
@@ -799,9 +811,42 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
       
       // Simple fallback for unrecognized responses
       console.log('No specific handler found, using fallback');
-      const fallbackMsg = "I didn't understand your response. Please provide a specific amount (e.g., '500') or type 'n/a' if this doesn't apply to you. You can also restart the conversation by uploading a new PDF.";
-      this.addAgentMessage(fallbackMsg);
-      return fallbackMsg;
+      
+      // Fallback: Use LangChain agent for complex queries
+      try {
+        if (!this.agentExecutor) {
+          await this.initializeAgent();
+        }
+        
+        const context = {
+          extractedData: this.state.extractedData,
+          deductionAnswers: this.state.deductionAnswers,
+          currentQuestion: this.getCurrentQuestion(),
+          filedSummaries: this.state.filedSummaries,
+          lastUserMessage: lastUserMessage || '',
+          lastAgentMessage: lastAgentMessage || ''
+        };
+        
+        const response = await this.agentExecutor!.invoke({ 
+          input: lastUserMessage || '' 
+        });
+        
+        const reply = response.output || 'I apologize, but I need more information to help you properly. Could you please provide more details about your tax situation?';
+        
+        // Check if the reply indicates a summary or conclusion
+        if (reply.toLowerCase().includes('summary') || reply.toLowerCase().includes('conclusion') || reply.toLowerCase().includes('final')) {
+          this.state.done = true;
+        }
+        
+        this.addAgentMessage(reply);
+        return reply;
+        
+      } catch (error) {
+        console.error('Error in agent conversation:', error);
+        const fallbackMsg = "I'm having trouble processing your request. Could you please rephrase your question or provide more specific details about what you need help with?";
+        this.addAgentMessage(fallbackMsg);
+        return fallbackMsg;
+      }
       
     } catch (error) {
       console.error('Error in nextAdvisorMessage:', error);
