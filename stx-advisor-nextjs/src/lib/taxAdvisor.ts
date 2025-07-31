@@ -236,6 +236,61 @@ export class TaxAdvisor {
     // Simple function-based tools that work with LangChain
     const tools = [
       {
+        name: 'get_tax_free_threshold',
+        description: 'Get the tax-free threshold for a specific year in Germany',
+        schema: {
+          type: 'object',
+          properties: {
+            year: { type: 'number', description: 'Tax year (2021-2026)' }
+          },
+          required: ['year']
+        },
+        func: async (input: any) => {
+          const { year } = input;
+          try {
+            const threshold = TaxAdvisor.TAX_FREE_THRESHOLDS[year];
+            if (!threshold) {
+              return `No threshold data available for year ${year}. Available years: ${Object.keys(TaxAdvisor.TAX_FREE_THRESHOLDS).join(', ')}`;
+            }
+            return `Tax-free threshold for ${year}: €${threshold.toLocaleString('de-DE')}`;
+          } catch (error) {
+            throw error;
+          }
+        }
+      },
+      {
+        name: 'check_income_vs_threshold',
+        description: 'Check if income is below the tax-free threshold for a specific year',
+        schema: {
+          type: 'object',
+          properties: {
+            income: { type: 'number', description: 'Gross income in euros' },
+            year: { type: 'number', description: 'Tax year (2021-2026)' }
+          },
+          required: ['income', 'year']
+        },
+        func: async (input: any) => {
+          const { income, year } = input;
+          try {
+            const threshold = TaxAdvisor.TAX_FREE_THRESHOLDS[year];
+            if (!threshold) {
+              return `No threshold data available for year ${year}`;
+            }
+            
+            const isBelow = income < threshold;
+            const difference = threshold - income;
+            
+            if (isBelow) {
+              return `Income (€${income.toLocaleString('de-DE')}) is below the tax-free threshold (€${threshold.toLocaleString('de-DE')}) for ${year}. Difference: €${difference.toLocaleString('de-DE')}. Full refund possible.`;
+            } else {
+              return `Income (€${income.toLocaleString('de-DE')}) is above the tax-free threshold (€${threshold.toLocaleString('de-DE')}) for ${year}. Difference: €${Math.abs(difference).toLocaleString('de-DE')}. Deductions may be needed.`;
+            }
+          } catch (error) {
+            throw error;
+          }
+        }
+      },
+      {
         name: 'calculate_tax_refund',
         description: 'Calculate potential tax refund based on income, tax paid, and deductions',
         schema: {
@@ -325,13 +380,20 @@ Current context:
 - Current question: ${this.getCurrentQuestion()?.question || 'None'}
 
 Important rules:
-- If user says "yes" to year confirmation, check if income is below tax-free threshold
-- If below threshold, provide early exit summary with full refund
+- ALWAYS use the check_income_vs_threshold tool when user confirms the tax year
+- If income is below threshold, provide early exit summary with full refund
 - If above threshold, ask for status (bachelor, master, new_employee, full_time)
 - For deduction questions, ask for specific amounts or "n/a"
+- Use get_tax_free_threshold tool to get threshold information
 - Always be professional, accurate, and helpful
 
-Use the available tools to perform calculations.`],
+Available tools:
+- get_tax_free_threshold: Get threshold for specific year
+- check_income_vs_threshold: Compare income vs threshold
+- calculate_tax_refund: Calculate refund based on income/tax/deductions
+- check_tax_deductions: Check deductions for specific status
+
+Use the available tools to perform calculations and provide accurate advice.`],
       ['human', '{input}'],
       ['human', '{agent_scratchpad}']
     ]);
