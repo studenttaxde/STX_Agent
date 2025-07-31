@@ -114,8 +114,8 @@ export default function TaxAdvisorApp() {
         try {
           setProcessingStatus(`Processing documents... (attempt ${retryCount + 1}/${maxRetries + 1})`)
           response = await fetch('/api/extract-pdfs', {
-            method: 'POST',
-            body: formData
+        method: 'POST',
+        body: formData
           })
           break // Success, exit retry loop
         } catch (error) {
@@ -356,8 +356,8 @@ export default function TaxAdvisorApp() {
       if (response.ok) {
         const data = await response.json()
         
-        setState(prev => ({
-          ...prev,
+          setState(prev => ({
+            ...prev,
           messages: [...prev.messages, { sender: 'assistant', text: data.message }],
           loading: false,
           deductionAnswers: data.deduction_answers || prev.deductionAnswers,
@@ -489,7 +489,7 @@ export default function TaxAdvisorApp() {
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-6xl mx-auto">
-          {/* Header */}
+      {/* Header */}
           <div className="text-center mb-8">
             <h1 className="text-4xl font-bold text-gray-900 mb-2">
               German Tax Advisor
@@ -497,7 +497,7 @@ export default function TaxAdvisorApp() {
             <p className="text-gray-600">
               Upload your tax documents and get personalized advice
             </p>
-          </div>
+            </div>
 
           {/* Existing Data Modal */}
           {showExistingDataModal && (
@@ -522,9 +522,9 @@ export default function TaxAdvisorApp() {
                   >
                     Start New
                   </button>
-                </div>
-              </div>
             </div>
+          </div>
+        </div>
           )}
 
           {/* File Upload Section */}
@@ -559,8 +559,8 @@ export default function TaxAdvisorApp() {
                         </div>
                         <span>This may take a few moments</span>
                       </div>
-                    </div>
-                  </div>
+                </div>
+              </div>
                 ) : (
                   <div className="mb-6">
                     <label htmlFor="file-upload" className="cursor-pointer bg-gradient-to-r from-blue-600 to-purple-600 text-white px-8 py-4 rounded-xl hover:from-blue-700 hover:to-purple-700 transition-all duration-200 font-semibold text-lg shadow-lg">
@@ -582,9 +582,9 @@ export default function TaxAdvisorApp() {
                   {state.loading ? 'Please wait while we analyze your documents...' : 'Upload your German tax documents (Lohnsteuerbescheinigung, etc.)'}
                 </p>
               </div>
-            </div>
-          )}
-
+                </div>
+              )}
+              
           {/* Document Analysis Summary - Only show once after upload */}
           {state.multiPDFData && state.step === 'advisor' && (
             <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
@@ -625,8 +625,8 @@ export default function TaxAdvisorApp() {
                 </div>
 
                 <div className="bg-gradient-to-br from-red-50 to-red-100 rounded-xl p-6 border border-red-200">
-                  <div className="flex items-center justify-between">
-                    <div>
+                      <div className="flex items-center justify-between">
+                        <div>
                       <div className="text-sm font-medium text-red-600 mb-1">Tax Paid</div>
                       <div className="text-3xl font-bold text-red-900">
                         {formatCurrency(state.multiPDFData.summary.incomeTaxPaid)}
@@ -636,13 +636,13 @@ export default function TaxAdvisorApp() {
                       <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd"/>
                       </svg>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
 
                 <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-xl p-6 border border-green-200">
-                  <div className="flex items-center justify-between">
-                    <div>
+                      <div className="flex items-center justify-between">
+                        <div>
                       <div className="text-sm font-medium text-green-600 mb-1">Employer</div>
                       <div className="text-lg font-bold text-green-900 truncate">
                         {state.multiPDFData.summary.employer || 'Multiple Employers'}
@@ -655,8 +655,8 @@ export default function TaxAdvisorApp() {
                     </div>
                   </div>
                 </div>
-              </div>
-
+                        </div>
+                        
               {/* Document Details - Collapsible */}
               {state.multiPDFData.results && state.multiPDFData.results.length > 1 && (
                 <details className="bg-gray-50 rounded-xl p-4">
@@ -673,7 +673,7 @@ export default function TaxAdvisorApp() {
                           <div className="flex-1">
                             <div className="font-semibold text-gray-900 mb-1">
                               {result.name || `Document ${index + 1}`}
-                            </div>
+                              </div>
                             <div className="text-sm text-gray-600 space-y-1">
                               {result.time_period_from && result.time_period_to && (
                                 <div>Period: {result.time_period_from} - {result.time_period_to}</div>
@@ -681,7 +681,7 @@ export default function TaxAdvisorApp() {
                               {result.employer && (
                                 <div>Employer: {result.employer}</div>
                               )}
-                            </div>
+                              </div>
                           </div>
                           <div className="text-right ml-4">
                             <div className="text-sm font-medium text-gray-900">
@@ -697,7 +697,7 @@ export default function TaxAdvisorApp() {
                   </div>
                 </details>
               )}
-            </div>
+                </div>
           )}
 
           {/* Chat Interface */}
@@ -745,54 +745,54 @@ export default function TaxAdvisorApp() {
                           </div>
                           <span className="text-sm text-gray-600">Processing...</span>
                         </div>
-                      </div>
-                    </div>
-                  )}
+                  </div>
+                </div>
+              )}
                 </div>
 
                 {!state.done && (
                   <div className="border-t border-gray-200 p-6">
-                    <form
-                      onSubmit={(e) => {
+                <form
+                  onSubmit={(e) => {
                         e.preventDefault()
                         const input = e.currentTarget.elements.namedItem('message') as HTMLInputElement
-                        if (input.value.trim()) {
+                    if (input.value.trim()) {
                           handleUserResponse(input.value.trim())
                           input.value = ''
-                        }
-                      }}
-                      className="flex space-x-4"
-                    >
-                      <input
-                        type="text"
+                    }
+                  }}
+                  className="flex space-x-4"
+                >
+                  <input
+                    type="text"
                         name="message"
                         placeholder="Type your response..."
                         className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-900"
-                        disabled={state.loading}
-                      />
-                      <button
-                        type="submit"
-                        disabled={state.loading}
+                    disabled={state.loading}
+                  />
+                  <button
+                    type="submit"
+                    disabled={state.loading}
                         className="px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl hover:from-blue-700 hover:to-purple-700 disabled:opacity-50 transition-all duration-200 font-semibold"
-                      >
+                  >
                         Send
-                      </button>
-                    </form>
+                  </button>
+                </form>
                   </div>
                 )}
-
+                  
                 {state.done && (
                   <div className="border-t border-gray-200 p-6">
-                    <button
-                      onClick={handleFileAnotherYear}
+                  <button
+                    onClick={handleFileAnotherYear}
                       className="w-full px-8 py-4 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-xl hover:from-green-700 hover:to-emerald-700 transition-all duration-200 font-semibold text-lg"
-                    >
+                  >
                       File for Another Year
-                    </button>
-                  </div>
-                )}
-              </div>
+                  </button>
+                </div>
+              )}
             </div>
+          </div>
           )}
 
           {/* Previous Filings - Only show if there are any */}
@@ -835,7 +835,7 @@ export default function TaxAdvisorApp() {
             </div>
           )}
         </div>
-      </div>
+        </div>
     </div>
   )
 }
