@@ -58,7 +58,7 @@ export default function AutopilotFlow() {
     try {
       const formData = new FormData()
       Array.from(selectedFiles).forEach(file => {
-        formData.append('files', file)
+        formData.append('pdfs', file)
       })
       formData.append('statusKey', statusKey)
 
