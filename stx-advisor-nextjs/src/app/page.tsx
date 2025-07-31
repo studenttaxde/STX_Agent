@@ -269,6 +269,51 @@ export default function TaxAdvisorApp() {
 
       setProcessingStatus('')
 
+      // Initialize the advisor with the extracted data
+      try {
+        setProcessingStatus('Initializing tax advisor...')
+        
+        const advisorResponse = await fetch('/api/advisor', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'initialize',
+            sessionId: 'default',
+            extractedData: aggregatedData,
+            existingData: null,
+            suggestedDeductions: deductions
+          })
+        })
+
+        if (advisorResponse.ok) {
+          const advisorData = await advisorResponse.json()
+          setState(prev => ({
+            ...prev,
+            messages: [
+              { sender: 'assistant', text: advisorData.message }
+            ]
+          }))
+        } else {
+          console.error('Failed to initialize advisor:', await advisorResponse.text())
+          // Add a fallback message
+          setState(prev => ({
+            ...prev,
+            messages: [
+              { sender: 'assistant', text: 'Hello! I\'ve analyzed your tax documents. Let me help you with your tax filing process. Please confirm the tax year and I\'ll guide you through the deductions.' }
+            ]
+          }))
+        }
+      } catch (error) {
+        console.error('Error initializing advisor:', error)
+        // Add a fallback message
+        setState(prev => ({
+          ...prev,
+          messages: [
+            { sender: 'assistant', text: 'Hello! I\'ve analyzed your tax documents. Let me help you with your tax filing process. Please confirm the tax year and I\'ll guide you through the deductions.' }
+            ]
+        }))
+      }
+
     } catch (error) {
       console.error('Error processing files:', error)
       setState(prev => ({ ...prev, loading: false }))
