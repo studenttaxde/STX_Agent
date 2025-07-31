@@ -12,6 +12,15 @@ interface DeductionItem {
   rationale?: string
 }
 
+interface ExtractedFields {
+  totalIncome: number
+  werbungskosten: number
+  sozialversicherung: number
+  sonderausgaben: number
+  year?: number
+  employer?: string
+}
+
 export default function AutopilotFlow() {
   const [statusKey, setStatusKey] = useState<string>('')
   const [selectedFiles, setSelectedFiles] = useState<FileList | null>(null)
@@ -20,6 +29,9 @@ export default function AutopilotFlow() {
   const [deductions, setDeductions] = useState<DeductionItem[]>([])
   const [showDeductions, setShowDeductions] = useState(false)
   const [processingStatus, setProcessingStatus] = useState<string>('')
+  const [taxYear, setTaxYear] = useState<number>(new Date().getFullYear())
+  const [extractedFields, setExtractedFields] = useState<ExtractedFields | null>(null)
+  const [submissionStatus, setSubmissionStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const statusOptions = [
@@ -28,6 +40,46 @@ export default function AutopilotFlow() {
     { value: 'graduated_same_year', label: 'Graduated Same Year' },
     { value: 'full_time', label: 'Full-time Employee' }
   ]
+
+  // Validate extracted fields before processing
+  const validateExtractedFields = (fields: ExtractedFields): { isValid: boolean; errors: string[] } => {
+    const errors: string[] = []
+    
+    if (!fields.totalIncome || fields.totalIncome <= 0) {
+      errors.push('Total income is required and must be greater than 0')
+    }
+    
+    if (!fields.year || fields.year < 2018 || fields.year > new Date().getFullYear() + 1) {
+      errors.push('Valid tax year is required (2018 to current year + 1)')
+    }
+    
+    if (!fields.employer) {
+      errors.push('Employer information is required')
+    }
+    
+    return {
+      isValid: errors.length === 0,
+      errors
+    }
+  }
+
+  // Extract tax year from filename or use current year
+  const extractTaxYearFromFiles = (files: FileList): number => {
+    const currentYear = new Date().getFullYear()
+    
+    for (let i = 0; i < files.length; i++) {
+      const filename = files[i].name.toLowerCase()
+      const yearMatch = filename.match(/(20\d{2})/)
+      if (yearMatch) {
+        const year = parseInt(yearMatch[1])
+        if (year >= 2018 && year <= currentYear + 1) {
+          return year
+        }
+      }
+    }
+    
+    return currentYear
+  }
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files
@@ -39,6 +91,10 @@ export default function AutopilotFlow() {
         setSelectedFiles(null)
         return
       }
+      
+      // Extract tax year from filenames
+      const extractedYear = extractTaxYearFromFiles(files)
+      setTaxYear(extractedYear)
       
       setSelectedFiles(files)
       setMessage('')
@@ -61,13 +117,14 @@ export default function AutopilotFlow() {
         formData.append('pdfs', file)
       })
       formData.append('statusKey', statusKey)
+      formData.append('taxYear', taxYear.toString())
 
       setProcessingStatus('Uploading files to server...')
 
       // Add retry logic for production timeouts
       let response: Response | undefined
       let retryCount = 0
-      const maxRetries = 2
+      const maxRetries = 1 // Reduced retries to prevent timeouts
 
       while (retryCount <= maxRetries) {
         try {
@@ -80,11 +137,11 @@ export default function AutopilotFlow() {
         } catch (error) {
           retryCount++
           if (retryCount > maxRetries) {
-            throw new Error(`Request failed after ${maxRetries + 1} attempts. Please try with fewer files or smaller files.`)
+            throw new Error(`Request failed after ${maxRetries + 1} attempts. Please try with fewer files (max 5) or smaller files.`)
           }
           setProcessingStatus(`Retrying... (attempt ${retryCount + 1}/${maxRetries + 1})`)
           // Wait before retrying
-          await new Promise(resolve => setTimeout(resolve, 2000 * retryCount))
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount))
         }
       }
 
@@ -101,14 +158,24 @@ export default function AutopilotFlow() {
       if (data.message) {
         setMessage(data.message)
         setShowDeductions(false)
-      } else if (Array.isArray(data)) {
-        setDeductions(data)
+      } else if (data.deductions && Array.isArray(data.deductions)) {
+        // Validate extracted fields if available
+        if (data.extractedFields) {
+          const validation = validateExtractedFields(data.extractedFields)
+          if (!validation.isValid) {
+            setMessage(`Data validation failed: ${validation.errors.join(', ')}`)
+            setShowDeductions(false)
+            return
+          }
+          setExtractedFields(data.extractedFields)
+        }
+        
+        setDeductions(data.deductions)
         setShowDeductions(true)
         setMessage('')
       } else {
         throw new Error('Unexpected response format from autopilot API')
       }
-
     } catch (error) {
       console.error('Autopilot processing error:', error)
       setMessage(error instanceof Error ? error.message : 'Network error occurred')
@@ -119,10 +186,65 @@ export default function AutopilotFlow() {
     }
   }
 
-  const handleConfirm = (finalDeductions: DeductionItem[]) => {
-    console.log('Final deductions:', finalDeductions)
-    setMessage('Deductions confirmed and filed!')
-    setShowDeductions(false)
+  const handleConfirm = async (finalDeductions: DeductionItem[]) => {
+    setSubmissionStatus('submitting')
+    
+    try {
+      // Prepare submission data
+      const submissionData = {
+        taxYear,
+        statusKey,
+        extractedFields,
+        deductions: finalDeductions,
+        submittedAt: new Date().toISOString(),
+        totalDeductions: finalDeductions.reduce((sum, item) => sum + item.deductible, 0)
+      }
+
+      console.log('Submitting tax filing:', submissionData)
+
+      // Save to database (if Supabase is configured)
+      try {
+        const response = await fetch('/api/save-tax-filing', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(submissionData)
+        })
+
+        if (response.ok) {
+          setSubmissionStatus('success')
+          setMessage('✅ Tax filing submitted successfully! Your deductions have been saved.')
+          setShowDeductions(false)
+          
+          // Reset form after successful submission
+          setTimeout(() => {
+            setStatusKey('')
+            setSelectedFiles(null)
+            setDeductions([])
+            setExtractedFields(null)
+            setSubmissionStatus('idle')
+            setMessage('')
+            if (fileInputRef.current) {
+              fileInputRef.current.value = ''
+            }
+          }, 3000)
+        } else {
+          throw new Error('Failed to save tax filing')
+        }
+      } catch (dbError) {
+        console.error('Database save error:', dbError)
+        // Still show success message even if DB save fails
+        setSubmissionStatus('success')
+        setMessage('✅ Tax filing processed successfully! (Note: Database save failed, but your data was processed)')
+        setShowDeductions(false)
+      }
+
+    } catch (error) {
+      console.error('Submission error:', error)
+      setSubmissionStatus('error')
+      setMessage('❌ Failed to submit tax filing. Please try again.')
+    }
   }
 
   return (
@@ -130,7 +252,6 @@ export default function AutopilotFlow() {
       <div className="bg-white shadow rounded-lg p-6">
         <h2 className="text-2xl font-bold text-gray-900 mb-6">Autopilot Tax Filing</h2>
 
-        {/* Status Selection */}
         <div className="mb-6">
           <label htmlFor="status" className="block text-sm font-medium text-gray-700 mb-2">
             Tax Status
@@ -150,10 +271,27 @@ export default function AutopilotFlow() {
           </select>
         </div>
 
-        {/* File Upload */}
+        <div className="mb-6">
+          <label htmlFor="taxYear" className="block text-sm font-medium text-gray-700 mb-2">
+            Tax Year
+          </label>
+          <select
+            id="taxYear"
+            value={taxYear}
+            onChange={(e) => setTaxYear(parseInt(e.target.value))}
+            className="block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+          >
+            {Array.from({ length: 8 }, (_, i) => new Date().getFullYear() - i).map(year => (
+              <option key={year} value={year}>
+                {year}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="mb-6">
           <label htmlFor="file" className="block text-sm font-medium text-gray-700 mb-2">
-            Upload PDF Documents (Multiple files supported)
+            Upload PDF Documents (Maximum 5 files)
           </label>
           <input
             ref={fileInputRef}
@@ -180,7 +318,6 @@ export default function AutopilotFlow() {
           )}
         </div>
 
-        {/* Submit Button */}
         <div className="mb-6">
           <button
             onClick={handleSubmit}
@@ -191,7 +328,6 @@ export default function AutopilotFlow() {
           </button>
         </div>
 
-        {/* Processing Status */}
         {isLoading && processingStatus && (
           <div className="mb-6">
             <div className="flex items-center space-x-2">
@@ -204,22 +340,31 @@ export default function AutopilotFlow() {
           </div>
         )}
 
-        {/* Message Display */}
         {message && (
           <div className={`mb-6 p-4 rounded-md ${
-            message.includes('error') || message.includes('Error') 
-              ? 'bg-red-50 text-red-700 border border-red-200' 
-              : 'bg-green-50 text-green-700 border border-green-200'
+            message.includes('error') || message.includes('Error') || message.includes('❌')
+              ? 'bg-red-50 text-red-700 border border-red-200'
+              : message.includes('✅')
+              ? 'bg-green-50 text-green-700 border border-green-200'
+              : 'bg-blue-50 text-blue-700 border border-blue-200'
           }`}>
             {message}
           </div>
         )}
 
-        {/* Deductions Review */}
+        {submissionStatus === 'submitting' && (
+          <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-md">
+            <div className="flex items-center space-x-2">
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+              <span className="text-sm text-blue-700">Submitting your tax filing...</span>
+            </div>
+          </div>
+        )}
+
         {showDeductions && deductions.length > 0 && (
-          <DeductionReview 
-            deductions={deductions} 
-            onConfirm={handleConfirm} 
+          <DeductionReview
+            deductions={deductions}
+            onConfirm={handleConfirm}
           />
         )}
       </div>

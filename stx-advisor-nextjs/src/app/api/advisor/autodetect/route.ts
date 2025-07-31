@@ -42,6 +42,7 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
     const statusKey = formData.get('statusKey') as string
+    const taxYearStr = formData.get('taxYear') as string
     const pdfFiles = formData.getAll('pdfs') as File[]
     
     if (!statusKey || !pdfFiles || pdfFiles.length === 0) {
@@ -51,9 +52,29 @@ export async function POST(request: NextRequest) {
       )
     }
     
+    // Parse tax year (default to current year if not provided)
+    const taxYear = taxYearStr ? parseInt(taxYearStr) : new Date().getFullYear()
+    const currentYear = new Date().getFullYear()
+    
+    if (taxYear < 2018 || taxYear > currentYear + 1) {
+      return NextResponse.json(
+        { error: 'Invalid tax year. Must be between 2018 and current year + 1' },
+        { status: 400 }
+      )
+    }
+    
     // Process each PDF and aggregate results
     const aggregatedData: ExtractedData = {
       totalIncome: 0
+    }
+    
+    const extractedFields: ExtractedFields = {
+      totalIncome: 0,
+      werbungskosten: 0,
+      sozialversicherung: 0,
+      sonderausgaben: 0,
+      year: taxYear,
+      employer: 'Unknown'
     }
     
     for (const pdfFile of pdfFiles) {
@@ -69,25 +90,45 @@ export async function POST(request: NextRequest) {
           aggregatedData[key] = (aggregatedData[key] || 0) + value
         }
       })
+      
+      // Update extracted fields
+      extractedFields.totalIncome += parsed.totalIncome
+      extractedFields.werbungskosten += parsed.werbungskosten
+      extractedFields.sozialversicherung += parsed.sozialversicherung
+      extractedFields.sonderausgaben += parsed.sonderausgaben
+      
+      // Extract employer from filename if available
+      if (pdfFile.name.toLowerCase().includes('employer')) {
+        extractedFields.employer = pdfFile.name.replace('.pdf', '').replace(/\d+/g, '').trim()
+      }
     }
     
-    // Load rules and compute deductions
-    const rules = loadRulesForYear(2024)
+    // Load rules for the specified year
+    const rules = loadRulesForYear(taxYear)
     const filtered = filterCategories(rules, statusKey, aggregatedData)
     const deductionResults = computeDeductions(filtered, aggregatedData)
     
     // Check if income is below basic allowance
     if (aggregatedData.totalIncome <= rules.basicAllowance) {
       return NextResponse.json({
-        message: `Your total income (€${aggregatedData.totalIncome.toLocaleString('de-DE')}) is below the basic allowance (€${rules.basicAllowance.toLocaleString('de-DE')}). No deductions needed.`
+        message: `Your total income (€${aggregatedData.totalIncome.toLocaleString('de-DE')}) is below the basic allowance (€${rules.basicAllowance.toLocaleString('de-DE')}) for ${taxYear}. No deductions needed.`
       })
     }
     
     // Convert DeductionResult to DeductionItem for compatibility
     const deductions = deductionResults.map(convertDeductionResult)
     
-    // Return deductions array
-    return NextResponse.json(deductions)
+    // Return deductions array with extracted fields for validation
+    return NextResponse.json({
+      deductions,
+      extractedFields,
+      taxYear,
+      summary: {
+        totalIncome: aggregatedData.totalIncome,
+        basicAllowance: rules.basicAllowance,
+        year: taxYear
+      }
+    })
     
   } catch (error) {
     console.error('Autodetect error:', error)
