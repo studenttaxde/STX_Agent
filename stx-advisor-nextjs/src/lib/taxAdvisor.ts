@@ -339,7 +339,7 @@ Always be professional, accurate, and helpful. Use the available tools to perfor
       return "No data available to summarize.";
     }
     
-    const { full_name, employer, total_hours, gross_income, income_tax_paid, year } = this.state.extractedData;
+    const { full_name, employer, total_hours, gross_income, income_tax_paid, solidaritaetszuschlag, year } = this.state.extractedData;
 
     return `Here's what I found from your documents:
 
@@ -348,7 +348,7 @@ Always be professional, accurate, and helpful. Use the available tools to perfor
 ⏱️ **Work Period:** ${total_hours ? `${total_hours} hours` : "Not specified"}
 💶 **Gross Income:** €${Number(gross_income || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
 💰 **Lohnsteuer Paid:** €${Number(income_tax_paid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
-📅 **Detected Tax Year:** ${year || "Not specified"}`;
+${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszuschlag).toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n` : ''}📅 **Detected Tax Year:** ${year || "Not specified"}`;
   }
 
   private isBelowThreshold(): boolean {
@@ -368,7 +368,7 @@ Always be professional, accurate, and helpful. Use the available tools to perfor
       return "No data available for summary.";
     }
     
-    const { year, gross_income, income_tax_paid, full_name, employer } = this.state.extractedData;
+    const { year, gross_income, income_tax_paid, solidaritaetszuschlag, full_name, employer } = this.state.extractedData;
     const threshold = year ? TaxAdvisor.TAX_FREE_THRESHOLDS[year] : 0;
     
     let result = `# 📊 **Tax Filing Summary for ${full_name || "User"}**\n\n`;
@@ -391,6 +391,7 @@ Always be professional, accurate, and helpful. Use the available tools to perfor
       tax_year: year,
       gross_income: Number(gross_income || 0),
       tax_paid: Number(income_tax_paid || 0),
+      solidarity_tax: Number(solidaritaetszuschlag || 0),
       tax_free_threshold: threshold,
       status: "below_threshold",
       estimated_refund: Number(income_tax_paid || 0),

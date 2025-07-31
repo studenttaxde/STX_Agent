@@ -7,6 +7,7 @@ export interface ExtractedData {
   total_hours?: number;
   gross_income?: number;
   income_tax_paid?: number;
+  solidaritaetszuschlag?: number;
   year?: number;
   fallback?: string;
   error?: string;
