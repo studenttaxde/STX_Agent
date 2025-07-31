@@ -151,6 +151,8 @@ export default function TaxAdvisorApp() {
         console.log('Processing result:', result)
         const resultData = result.data
         console.log('Result data:', resultData)
+        console.log('Result data keys:', Object.keys(resultData))
+        console.log('Result data values:', Object.values(resultData))
         
         if (resultData.bruttolohn) {
           const bruttolohn = typeof resultData.bruttolohn === 'string' ? parseFloat(resultData.bruttolohn) : resultData.bruttolohn
@@ -203,6 +205,8 @@ export default function TaxAdvisorApp() {
       }
       
       console.log('Final aggregated data:', aggregatedData)
+      console.log('Aggregated data keys:', Object.keys(aggregatedData))
+      console.log('Aggregated data values:', Object.values(aggregatedData))
 
       // Check for existing data for this year
       const yearNum = aggregatedData.year
