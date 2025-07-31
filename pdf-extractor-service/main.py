@@ -10,6 +10,7 @@ import fitz  # PyMuPDF
 import tempfile
 import os
 import logging
+import re
 
 # LangChain imports for enhanced text processing
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -17,7 +18,7 @@ from langchain.schema import Document
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
-import re
+import json
 
 # LangSmith tracing setup
 from langchain.callbacks import LangChainTracer
@@ -74,6 +75,152 @@ text_splitter = RecursiveCharacterTextSplitter(
     length_function=len,
     separators=["\n\n", "\n", " ", ""]
 )
+
+def parse_german_tax_document(text: str) -> dict:
+    """
+    Parse German tax document text and extract relevant fields
+    """
+    result = {
+        "bruttolohn": 0,
+        "lohnsteuer": 0,
+        "solidaritaetszuschlag": 0,
+        "employer": "Unknown",
+        "name": "User",
+        "year": None,
+        "steuerklasse": None,
+        "beschaeftigungszeitraum": None
+    }
+    
+    try:
+        # Extract year from text
+        year_match = re.search(r'Veranlagungszeitraum:\s*(\d{4})', text)
+        if year_match:
+            result["year"] = int(year_match.group(1))
+        
+        # Extract employer
+        employer_match = re.search(r'Arbeitgeber\s+Name des Arbeitgebers\s+([^\n]+)', text)
+        if employer_match:
+            result["employer"] = employer_match.group(1).strip()
+        
+        # Extract name (Identifikationsnummer)
+        name_match = re.search(r'Identifikationsnummer\s+(\d+\s+\d+\s+\d+)', text)
+        if name_match:
+            result["name"] = f"User {name_match.group(1)}"
+        
+        # Extract tax class
+        steuerklasse_match = re.search(r'Steuerklasse\s+(\d+)', text)
+        if steuerklasse_match:
+            result["steuerklasse"] = int(steuerklasse_match.group(1))
+        
+        # Extract employment period
+        beschaeftigungszeitraum_match = re.search(r'Beschäftigungsjahr\s+\d{4}\s+vom\s+(\d{2}\.\d{2})\s+bis\s+(\d{2}\.\d{2})', text)
+        if beschaeftigungszeitraum_match:
+            result["beschaeftigungszeitraum"] = f"{beschaeftigungszeitraum_match.group(1)} - {beschaeftigungszeitraum_match.group(2)}"
+        
+        # Extract Bruttoarbeitslohn (gross income)
+        bruttolohn_match = re.search(r'Bruttoarbeitslohn\s+([\d\.,]+)', text)
+        if bruttolohn_match:
+            bruttolohn_str = bruttolohn_match.group(1).replace('.', '').replace(',', '.')
+            try:
+                result["bruttolohn"] = float(bruttolohn_str)
+            except ValueError:
+                pass
+        
+        # Extract einbehaltene Lohnsteuer (income tax paid)
+        lohnsteuer_match = re.search(r'einbehaltene Lohnsteuer\s+([\d\.,]+)', text)
+        if lohnsteuer_match:
+            lohnsteuer_str = lohnsteuer_match.group(1).replace('.', '').replace(',', '.')
+            try:
+                result["lohnsteuer"] = float(lohnsteuer_str)
+            except ValueError:
+                pass
+        
+        # Extract einbehaltener Solidaritätszuschlag
+        solidaritaetszuschlag_match = re.search(r'einbehaltener Solidaritätszuschlag\s+([\d\.,]+)', text)
+        if solidaritaetszuschlag_match:
+            solidaritaetszuschlag_str = solidaritaetszuschlag_match.group(1).replace('.', '').replace(',', '.')
+            try:
+                result["solidaritaetszuschlag"] = float(solidaritaetszuschlag_str)
+            except ValueError:
+                pass
+        
+        # If no year found, try to extract from filename or text
+        if not result["year"]:
+            year_from_text = re.search(r'(\d{4})', text)
+            if year_from_text:
+                result["year"] = int(year_from_text.group(1))
+        
+        logger.info(f"Parsed tax document: {result}")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error parsing German tax document: {e}")
+        return result
+
+def parse_with_llm(text: str, filename: str) -> dict:
+    """
+    Use LLM to parse German tax document and extract structured data
+    """
+    try:
+        openai_api_key = os.getenv('OPENAI_API_KEY')
+        if not openai_api_key:
+            logger.info("OpenAI API key not available, using regex parsing")
+            return parse_german_tax_document(text)
+        
+        llm = ChatOpenAI(
+            openai_api_key=openai_api_key,
+            model_name="gpt-4o-mini",
+            temperature=0.1
+        )
+        
+        prompt = PromptTemplate(
+            input_variables=["text", "filename"],
+            template="""
+You are a German tax document parser. Extract the following information from the provided German tax document text and return it as a JSON object.
+
+Required fields:
+- bruttolohn: Gross income (Bruttoarbeitslohn) as a number
+- lohnsteuer: Income tax paid (einbehaltene Lohnsteuer) as a number  
+- solidaritaetszuschlag: Solidarity surcharge (einbehaltener Solidaritätszuschlag) as a number
+- employer: Employer name (Arbeitgeber Name des Arbeitgebers)
+- name: Employee name or identification number
+- year: Tax year (Veranlagungszeitraum)
+- steuerklasse: Tax class (Steuerklasse) as a number
+- beschaeftigungszeitraum: Employment period
+
+Document: {filename}
+Text: {text}
+
+Return ONLY a valid JSON object with these fields. If a field is not found, use null or 0 as appropriate.
+Example format:
+{{
+  "bruttolohn": 50000.0,
+  "lohnsteuer": 8000.0,
+  "solidaritaetszuschlag": 440.0,
+  "employer": "Example GmbH",
+  "name": "User 123456789",
+  "year": 2024,
+  "steuerklasse": 1,
+  "beschaeftigungszeitraum": "01.01 - 31.12"
+}}
+"""
+        )
+        
+        chain = LLMChain(llm=llm, prompt=prompt)
+        result = chain.run(text=text[:4000], filename=filename)
+        
+        # Parse the JSON response
+        try:
+            parsed_result = json.loads(result.strip())
+            logger.info(f"LLM parsed result: {parsed_result}")
+            return parsed_result
+        except json.JSONDecodeError:
+            logger.warning("LLM returned invalid JSON, falling back to regex parsing")
+            return parse_german_tax_document(text)
+        
+    except Exception as e:
+        logger.warning(f"LLM parsing failed: {e}, falling back to regex parsing")
+        return parse_german_tax_document(text)
 
 def clean_text(text: str) -> str:
     """
@@ -244,6 +391,9 @@ def extract_text_from_file(file_content: bytes, filename: str) -> dict:
         # Enhance with LLM if available
         enhanced_text = enhance_text_with_llm(processed_text, filename)
         
+        # Parse the German tax document to extract structured data
+        parsed_data = parse_with_llm(enhanced_text, filename)
+        
         logger.info(f"Successfully extracted and enhanced text from {filename} ({page_count} pages)")
         
         return {
@@ -253,7 +403,8 @@ def extract_text_from_file(file_content: bytes, filename: str) -> dict:
             "page_count": page_count,
             "character_count": len(enhanced_text),
             "chunks_count": len(chunks),
-            "error": None
+            "error": None,
+            **parsed_data  # Include the parsed structured data
         }
         
     except Exception as e:
@@ -277,7 +428,7 @@ def root():
     return {
         "message": "PDF Extractor Service is running", 
         "version": "3.0.0", 
-        "features": ["LangChain Integration", "Text Enhancement", "Intelligent Processing", "LangSmith Tracing"],
+        "features": ["LangChain Integration", "Text Enhancement", "Intelligent Processing", "LangSmith Tracing", "German Tax Document Parsing"],
         "tracing_enabled": tracing_enabled
     }
 
