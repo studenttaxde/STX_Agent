@@ -663,53 +663,57 @@ If this is correct, I'll help you with your tax filing process. If not, please u
         return summary;
       }
       
-      // Handle year confirmation - simplified detection
-      if (lastUserMessage && /^(yes|y|yeah|correct|right)$/i.test(lastUserMessage)) {
-        console.log('Handling year confirmation - YES response');
-        const year = this.state.extractedData?.year;
-        if (year) {
-          // Add to filed summaries
-          this.state.filedSummaries.push({
-            year: year.toString(),
-            summary: { taxableIncome: 0, refund: 0 },
-            deductions: {}
-          });
-        }
+      // If we have extracted data but no deduction flow, we're in the year confirmation phase
+      if (this.state.extractedData && !this.state.deductionFlow && this.state.currentQuestionIndex === 0) {
+        console.log('In year confirmation phase');
         
-        // Check threshold after year confirmation
-        console.log('Checking threshold for year:', year, 'income:', this.state.extractedData?.gross_income);
-        if (this.isBelowThreshold()) {
-          console.log('Below threshold, showing early exit');
-          const summary = this.earlyExitSummary();
-          const finalMsg = `${summary}\n\nWould you like to file a tax return for another year?`;
-          this.addAgentMessage(finalMsg);
-          this.state.done = true;
-          return finalMsg;
-        }
-        
-        // If not below threshold, ask for status
-        console.log('Above threshold, asking for status');
-        const nextQuestion = `Since your income exceeds the tax-free threshold, let's check for deductible expenses to reduce your taxable income.
+        if (lastUserMessage && /^(yes|y|yeah|correct|right)$/i.test(lastUserMessage)) {
+          console.log('Year confirmed - checking threshold');
+          const year = this.state.extractedData.year;
+          
+          if (year) {
+            // Add to filed summaries
+            this.state.filedSummaries.push({
+              year: year.toString(),
+              summary: { taxableIncome: 0, refund: 0 },
+              deductions: {}
+            });
+            
+            // Check threshold
+            console.log('Checking threshold for year:', year, 'income:', this.state.extractedData.gross_income);
+            if (this.isBelowThreshold()) {
+              console.log('Below threshold, showing early exit');
+              const summary = this.earlyExitSummary();
+              const finalMsg = `${summary}\n\nWould you like to file a tax return for another year?`;
+              this.addAgentMessage(finalMsg);
+              this.state.done = true;
+              return finalMsg;
+            }
+            
+            // If not below threshold, ask for status
+            console.log('Above threshold, asking for status');
+            const nextQuestion = `Since your income exceeds the tax-free threshold, let's check for deductible expenses to reduce your taxable income.
 
 Please select your status for the year:
 1. **bachelor** (Bachelor's student)
 2. **master** (Master's student)  
 3. **new_employee** (Started job after graduation)
 4. **full_time** (Full-time employee)`;
-        this.addAgentMessage(nextQuestion);
-        return nextQuestion;
+            this.addAgentMessage(nextQuestion);
+            return nextQuestion;
+          }
+        }
+        
+        if (lastUserMessage && /^(no|n|nope|not correct|wrong year)$/i.test(lastUserMessage)) {
+          console.log('Year not confirmed');
+          const result = "Please upload the correct PDF for the year you want to file.";
+          return result;
+        }
       }
       
-      // Handle "no" response to year confirmation
-      if (lastUserMessage && /^(no|n|nope|not correct|wrong year)$/i.test(lastUserMessage)) {
-        console.log('Handling year confirmation - NO response');
-        const result = "Please upload the correct PDF for the year you want to file.";
-        return result;
-      }
-      
-      // Handle status selection
-      if (lastAgentMessage && (lastAgentMessage.includes('select your status for the year') || lastAgentMessage.includes('Please select your status'))) {
-        console.log('Handling status selection');
+      // If we have a deduction flow but no current question, we're in status selection
+      if (this.state.deductionFlow && this.state.currentQuestionIndex === 0) {
+        console.log('In status selection phase');
         let status: UserStatus | null = null;
         
         // Handle numeric input (1, 2, 3, 4)
@@ -749,6 +753,42 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
         }
       }
       
+      // Handle deduction questions
+      const currentQuestion = this.getCurrentQuestion();
+      if (currentQuestion && this.state.deductionFlow && this.state.currentQuestionIndex < this.state.deductionFlow.questions.length) {
+        console.log('Handling deduction question:', currentQuestion.question);
+        
+        const deductionAnswer = this.processDeductionAnswer(lastUserMessage || '');
+        
+        if (deductionAnswer) {
+          console.log('Deduction answer processed:', deductionAnswer);
+          this.state.deductionAnswers[deductionAnswer.questionId] = deductionAnswer;
+          this.state.currentQuestionIndex++;
+          
+          const nextQuestion = this.getCurrentQuestion();
+          if (nextQuestion) {
+            const nextMsg = `Great! I've recorded €${deductionAnswer.amount} for ${deductionAnswer.details}.
+
+**${nextQuestion.question}**
+
+Please provide the amount or type "n/a" if this doesn't apply to you.`;
+            this.addAgentMessage(nextMsg);
+            return nextMsg;
+          } else {
+            // All questions answered, generate final summary
+            console.log('All questions answered, generating final summary');
+            const summary = this.generateFinalSummary();
+            const finalMsg = `${summary}\n\nWould you like to file a tax return for another year?`;
+            this.addAgentMessage(finalMsg);
+            this.state.done = true;
+            return finalMsg;
+          }
+        } else {
+          const result = "I couldn't understand your response. Please provide a specific amount (e.g., '500') or type 'n/a' if this doesn't apply to you.";
+          return result;
+        }
+      }
+      
       // Handle "file for another year" response
       if (lastAgentMessage && lastAgentMessage.includes('file a tax return for another year')) {
         console.log('Handling file another year response');
@@ -763,56 +803,8 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
         }
       }
       
-      // Handle deduction questions
-      const currentQuestion = this.getCurrentQuestion();
-      if (currentQuestion && this.state.deductionFlow && this.state.currentQuestionIndex < this.state.deductionFlow.questions.length) {
-        console.log('Handling deduction question:', currentQuestion.question);
-        
-        // Check if the last agent message was asking for an amount or if we're in deduction flow
-        const isAskingForAmount = lastAgentMessage && (
-          lastAgentMessage.includes('provide the amount') ||
-          lastAgentMessage.includes('type "n/a"') ||
-          lastAgentMessage.includes('doesn\'t apply to you') ||
-          lastAgentMessage.includes('specific amount')
-        );
-        
-        if (isAskingForAmount || this.state.currentQuestionIndex > 0) {
-          const deductionAnswer = this.processDeductionAnswer(lastUserMessage || '');
-          
-          if (deductionAnswer) {
-            console.log('Deduction answer processed:', deductionAnswer);
-            this.state.deductionAnswers[deductionAnswer.questionId] = deductionAnswer;
-            this.state.currentQuestionIndex++;
-            
-            const nextQuestion = this.getCurrentQuestion();
-            if (nextQuestion) {
-              const nextMsg = `Great! I've recorded €${deductionAnswer.amount} for ${deductionAnswer.details}.
-
-**${nextQuestion.question}**
-
-Please provide the amount or type "n/a" if this doesn't apply to you.`;
-              this.addAgentMessage(nextMsg);
-              return nextMsg;
-            } else {
-              // All questions answered, generate final summary
-              console.log('All questions answered, generating final summary');
-              const summary = this.generateFinalSummary();
-              const finalMsg = `${summary}\n\nWould you like to file a tax return for another year?`;
-              this.addAgentMessage(finalMsg);
-              this.state.done = true;
-              return finalMsg;
-            }
-          } else {
-            const result = "I couldn't understand your response. Please provide a specific amount (e.g., '500') or type 'n/a' if this doesn't apply to you.";
-            return result;
-          }
-        }
-      }
-      
-      // Simple fallback for unrecognized responses
-      console.log('No specific handler found, using fallback');
-      
       // Fallback: Use LangChain agent for complex queries
+      console.log('No specific handler found, using LangChain fallback');
       try {
         if (!this.agentExecutor) {
           await this.initializeAgent();
