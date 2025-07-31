@@ -19,6 +19,9 @@ import {
 
 export class TaxAdvisor {
   private static readonly TAX_FREE_THRESHOLDS: Record<number, number> = {
+    2021: 9744,
+    2022: 10347,
+    2023: 10908,
     2024: 10908,
     2025: 11280,
     2026: 11640
@@ -647,7 +650,7 @@ If this is correct, I'll help you with your tax filing process. If not, please u
       }
       
       // Handle year confirmation
-      if (lastAgentMessage && lastAgentMessage.includes('confirm that the tax year')) {
+      if (lastAgentMessage && (lastAgentMessage.includes('confirm that the tax year') || lastAgentMessage.includes('Can you please confirm'))) {
         console.log('Handling year confirmation');
         if (lastUserMessage && /^(yes|y|yeah|correct|right)$/i.test(lastUserMessage)) {
           const year = this.state.extractedData?.year;
@@ -661,6 +664,7 @@ If this is correct, I'll help you with your tax filing process. If not, please u
           }
           
           // Check threshold after year confirmation
+          console.log('Checking threshold for year:', year, 'income:', this.state.extractedData?.gross_income);
           if (this.isBelowThreshold()) {
             console.log('Below threshold, showing early exit');
             const summary = this.earlyExitSummary();
