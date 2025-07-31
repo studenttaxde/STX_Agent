@@ -1,0 +1,27 @@
+{
+  "basicAllowance": 10908,
+  "Werbungskosten": {
+    "label": "Work-related expenses",
+    "categories": ["all"],
+    "cap": 1200,
+    "qualifiers": [
+      { "key": "amount_paid", "source": "werbungskosten" }
+    ]
+  },
+  "Sozialversicherung": {
+    "label": "Social insurance contributions",
+    "categories": ["all"],
+    "cap": 5000,
+    "qualifiers": [
+      { "key": "amount_paid", "source": "sozialversicherung" }
+    ]
+  },
+  "Sonderausgaben": {
+    "label": "Special expenses",
+    "categories": ["bachelor", "master", "graduate_same_year"],
+    "cap": 3000,
+    "qualifiers": [
+      { "key": "amount_paid", "source": "sonderausgaben" }
+    ]
+  }
+} 

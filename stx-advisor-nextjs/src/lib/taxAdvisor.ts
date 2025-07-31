@@ -17,6 +17,161 @@ import {
   TaxAdvisorState
 } from '@/types';
 
+export interface RuleConfig {
+  label: string;
+  categories: string[];
+  cap: number | null;
+  qualifiers: { key: string; source: string }[];
+}
+
+export interface YearRules {
+  basicAllowance: number;
+  [category: string]: RuleConfig | number;
+}
+
+export interface DeductionResult {
+  categoryKey: string;
+  label: string;
+  basis: number;
+  cap: number | null;
+  deductible: number;
+  rationale: string;
+}
+
+export function loadRulesForYear(year: number): YearRules {
+  try {
+    // In a real implementation, this would read from the file system
+    // For now, we'll return the 2024 rules as a fallback
+    if (year === 2024) {
+      return {
+        basicAllowance: 10908,
+        "Werbungskosten": {
+          label: "Work-related expenses",
+          categories: ["all"],
+          cap: 1200,
+          qualifiers: [
+            { key: "amount_paid", source: "werbungskosten" }
+          ]
+        },
+        "Sozialversicherung": {
+          label: "Social insurance contributions",
+          categories: ["all"],
+          cap: 5000,
+          qualifiers: [
+            { key: "amount_paid", source: "sozialversicherung" }
+          ]
+        },
+        "Sonderausgaben": {
+          label: "Special expenses",
+          categories: ["bachelor", "master", "graduate_same_year"],
+          cap: 3000,
+          qualifiers: [
+            { key: "amount_paid", source: "sonderausgaben" }
+          ]
+        }
+      }
+    }
+    
+    // Default fallback
+    return {
+      basicAllowance: 10908,
+      "Werbungskosten": {
+        label: "Work-related expenses",
+        categories: ["all"],
+        cap: 1200,
+        qualifiers: [
+          { key: "amount_paid", source: "werbungskosten" }
+        ]
+      }
+    }
+  } catch (error) {
+    console.error(`Failed to load rules for year ${year}:`, error)
+    // Return minimal fallback
+    return {
+      basicAllowance: 10908,
+      "Werbungskosten": {
+        label: "Work-related expenses",
+        categories: ["all"],
+        cap: 1200,
+        qualifiers: [
+          { key: "amount_paid", source: "werbungskosten" }
+        ]
+      }
+    }
+  }
+}
+
+export function filterCategories(
+  rules: YearRules,
+  statusKey: string,
+  extracted: Record<string, number>
+): RuleConfig[] {
+  const filteredRules: RuleConfig[] = []
+  
+  Object.entries(rules).forEach(([categoryKey, rule]) => {
+    if (categoryKey === 'basicAllowance') return
+    
+    const ruleConfig = rule as RuleConfig
+    if (ruleConfig.categories.includes('all') || ruleConfig.categories.includes(statusKey)) {
+      filteredRules.push(ruleConfig)
+    }
+  })
+  
+  return filteredRules
+}
+
+export function computeDeductions(
+  rules: RuleConfig[],
+  extracted: Record<string, number>
+): DeductionResult[] {
+  const deductions: DeductionResult[] = []
+  
+  rules.forEach(rule => {
+    // Find the category key for this rule
+    const categoryKey = Object.keys(extracted).find(key => 
+      key.toLowerCase().includes(rule.label.toLowerCase().split(' ')[0].toLowerCase())
+    ) || 'unknown'
+    
+    // Calculate basis from extracted data
+    let basis = 0
+    let rationale = ''
+    
+    // Werbungskosten calculation
+    if (rule.label.toLowerCase().includes('work-related')) {
+      basis = Math.min(1200, (extracted.totalIncome || 0) * 0.05) // 5% of income or 1200€ max
+      rationale = `Calculated as 5% of total income (€${extracted.totalIncome || 0}) or €1,200 maximum`
+    }
+    // Sozialversicherung calculation
+    else if (rule.label.toLowerCase().includes('social insurance')) {
+      basis = (extracted.krankenversicherung || 0) + 
+              (extracted.rentenversicherung || 0) + 
+              (extracted.arbeitslosenversicherung || 0) + 
+              (extracted.pflegeversicherung || 0)
+      rationale = `Sum of all social insurance contributions: health (€${extracted.krankenversicherung || 0}), pension (€${extracted.rentenversicherung || 0}), unemployment (€${extracted.arbeitslosenversicherung || 0}), care (€${extracted.pflegeversicherung || 0})`
+    }
+    // Sonderausgaben calculation
+    else if (rule.label.toLowerCase().includes('special expenses')) {
+      basis = (extracted.lohnsteuer || 0) + (extracted.solidaritaetszuschlag || 0)
+      rationale = `Sum of income tax (€${extracted.lohnsteuer || 0}) and solidarity surcharge (€${extracted.solidaritaetszuschlag || 0})`
+    }
+    
+    if (basis > 0) {
+      const deductible = rule.cap ? Math.min(basis, rule.cap) : basis
+      
+      deductions.push({
+        categoryKey: categoryKey,
+        label: rule.label,
+        basis: basis,
+        cap: rule.cap,
+        deductible: deductible,
+        rationale: rationale
+      })
+    }
+  })
+  
+  return deductions
+}
+
 export class TaxAdvisor {
   private static readonly TAX_FREE_THRESHOLDS: Record<number, number> = {
     2021: 9744,

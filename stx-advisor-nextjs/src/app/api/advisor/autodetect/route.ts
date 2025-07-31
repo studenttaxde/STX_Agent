@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { loadRulesForYear, filterCategories, computeDeductions, type YearRules, type RuleConfig, type DeductionResult } from '@/lib/taxAdvisor'
 
 interface DeductionItem {
   category: string
@@ -7,15 +8,6 @@ interface DeductionItem {
   deductible: number
   label?: string
   rationale?: string
-}
-
-interface TaxRules {
-  basicAllowance: number
-  categories: Record<string, {
-    maxAmount: number
-    percentage: number
-    label: string
-  }>
 }
 
 interface ExtractedData {
@@ -39,109 +31,16 @@ function parseLohnsteuerbescheinigung(buffer: ArrayBuffer): Record<string, numbe
   }
 }
 
-// Stub implementation for loading tax rules
-function loadRulesForYear(year: number): TaxRules {
+// Convert DeductionResult to DeductionItem for compatibility
+function convertDeductionResult(result: DeductionResult): DeductionItem {
   return {
-    basicAllowance: 10908, // 2024 basic allowance
-    categories: {
-      'werbungskosten': {
-        maxAmount: 1200,
-        percentage: 100,
-        label: 'Werbungskosten'
-      },
-      'sozialversicherung': {
-        maxAmount: 5000,
-        percentage: 100,
-        label: 'Sozialversicherungsbeiträge'
-      },
-      'sonderausgaben': {
-        maxAmount: 3000,
-        percentage: 100,
-        label: 'Sonderausgaben'
-      }
-    }
+    category: result.categoryKey,
+    basis: result.basis,
+    cap: result.cap,
+    deductible: result.deductible,
+    label: result.label,
+    rationale: result.rationale
   }
-}
-
-// Stub implementation for filtering categories based on status
-function filterCategories(rules: TaxRules, statusKey: string, extracted: ExtractedData): TaxRules {
-  // Filter categories based on status and extracted data
-  const filteredCategories: Record<string, any> = {}
-  
-  // Always include werbungskosten for all statuses
-  if (rules.categories.werbungskosten) {
-    filteredCategories.werbungskosten = rules.categories.werbungskosten
-  }
-  
-  // Include sozialversicherung if relevant data exists
-  if (extracted.krankenversicherung || extracted.rentenversicherung || extracted.arbeitslosenversicherung || extracted.pflegeversicherung) {
-    if (rules.categories.sozialversicherung) {
-      filteredCategories.sozialversicherung = rules.categories.sozialversicherung
-    }
-  }
-  
-  // Include sonderausgaben for certain statuses
-  if (['bachelor', 'master', 'graduated_same_year'].includes(statusKey)) {
-    if (rules.categories.sonderausgaben) {
-      filteredCategories.sonderausgaben = rules.categories.sonderausgaben
-    }
-  }
-  
-  return {
-    ...rules,
-    categories: filteredCategories
-  }
-}
-
-// Stub implementation for computing deductions
-function computeDeductions(filtered: TaxRules, extracted: ExtractedData): DeductionItem[] {
-  const deductions: DeductionItem[] = []
-  
-  // Compute Werbungskosten
-  if (filtered.categories.werbungskosten) {
-    const basis = Math.min(1200, extracted.totalIncome * 0.05) // 5% of income or 1200€ max
-    deductions.push({
-      category: 'werbungskosten',
-      basis: basis,
-      cap: filtered.categories.werbungskosten.maxAmount,
-      deductible: Math.min(basis, filtered.categories.werbungskosten.maxAmount),
-      label: filtered.categories.werbungskosten.label
-    })
-  }
-  
-  // Compute Sozialversicherung
-  if (filtered.categories.sozialversicherung) {
-    const socialTotal = (extracted.krankenversicherung || 0) + 
-                       (extracted.rentenversicherung || 0) + 
-                       (extracted.arbeitslosenversicherung || 0) + 
-                       (extracted.pflegeversicherung || 0)
-    
-    if (socialTotal > 0) {
-      deductions.push({
-        category: 'sozialversicherung',
-        basis: socialTotal,
-        cap: filtered.categories.sozialversicherung.maxAmount,
-        deductible: Math.min(socialTotal, filtered.categories.sozialversicherung.maxAmount),
-        label: filtered.categories.sozialversicherung.label
-      })
-    }
-  }
-  
-  // Compute Sonderausgaben
-  if (filtered.categories.sonderausgaben) {
-    const sonderausgaben = (extracted.lohnsteuer || 0) + (extracted.solidaritaetszuschlag || 0)
-    if (sonderausgaben > 0) {
-      deductions.push({
-        category: 'sonderausgaben',
-        basis: sonderausgaben,
-        cap: filtered.categories.sonderausgaben.maxAmount,
-        deductible: Math.min(sonderausgaben, filtered.categories.sonderausgaben.maxAmount),
-        label: filtered.categories.sonderausgaben.label
-      })
-    }
-  }
-  
-  return deductions
 }
 
 export async function POST(request: NextRequest) {
@@ -181,7 +80,7 @@ export async function POST(request: NextRequest) {
     // Load rules and compute deductions
     const rules = loadRulesForYear(2024)
     const filtered = filterCategories(rules, statusKey, aggregatedData)
-    const deductions = computeDeductions(filtered, aggregatedData)
+    const deductionResults = computeDeductions(filtered, aggregatedData)
     
     // Check if income is below basic allowance
     if (aggregatedData.totalIncome <= rules.basicAllowance) {
@@ -189,6 +88,9 @@ export async function POST(request: NextRequest) {
         message: `Your total income (€${aggregatedData.totalIncome.toLocaleString('de-DE')}) is below the basic allowance (€${rules.basicAllowance.toLocaleString('de-DE')}). No deductions needed.`
       })
     }
+    
+    // Convert DeductionResult to DeductionItem for compatibility
+    const deductions = deductionResults.map(convertDeductionResult)
     
     // Return deductions array
     return NextResponse.json(deductions)
