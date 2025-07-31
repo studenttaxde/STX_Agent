@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react'
 import DeductionReview from '@/components/DeductionReview'
+import ClarificationQuestions from '@/components/ClarificationQuestions'
 
 interface DeductionItem {
   category: string
@@ -32,6 +33,8 @@ export default function AutopilotFlow() {
   const [taxYear, setTaxYear] = useState<number>(new Date().getFullYear())
   const [extractedFields, setExtractedFields] = useState<ExtractedFields | null>(null)
   const [submissionStatus, setSubmissionStatus] = useState<'idle' | 'submitting' | 'success' | 'error'>('idle')
+  const [showClarificationQuestions, setShowClarificationQuestions] = useState(false)
+  const [clarificationAnswers, setClarificationAnswers] = useState<Record<string, any>>({})
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const statusOptions = [
@@ -79,6 +82,72 @@ export default function AutopilotFlow() {
     }
     
     return currentYear
+  }
+
+  // Check for missing fields that need clarification
+  const checkForMissingFields = (fields: ExtractedFields | null): any[] => {
+    if (!fields) return []
+    
+    const missingFields = []
+    
+    // Check for common missing fields
+    if (!fields.werbungskosten || fields.werbungskosten === 0) {
+      missingFields.push({
+        id: 'commute_distance',
+        question: 'What is your daily commute distance (one way) in kilometers?',
+        type: 'number' as const,
+        required: false,
+        category: 'Werbungskosten',
+        helpText: 'This helps calculate travel expenses. If you work from home, enter 0.'
+      })
+    }
+    
+    if (!fields.sozialversicherung || fields.sozialversicherung === 0) {
+      missingFields.push({
+        id: 'health_insurance',
+        question: 'Do you have private health insurance?',
+        type: 'select' as const,
+        options: ['Yes', 'No', 'Public insurance'],
+        required: false,
+        category: 'Sozialversicherung',
+        helpText: 'This affects social insurance contribution calculations.'
+      })
+    }
+    
+    return missingFields
+  }
+
+  // Handle clarification questions completion
+  const handleClarificationComplete = (answers: Record<string, any>) => {
+    setClarificationAnswers(answers)
+    setShowClarificationQuestions(false)
+    
+    // Update extracted fields with clarification answers
+    if (extractedFields) {
+      const updatedFields = { ...extractedFields }
+      
+      if (answers.commute_distance) {
+        updatedFields.werbungskosten = (answers.commute_distance * 0.30 * 220) // 30 cents per km, 220 working days
+      }
+      
+      if (answers.health_insurance) {
+        updatedFields.sozialversicherung = answers.health_insurance === 'Yes' ? 5000 : 0
+      }
+      
+      setExtractedFields(updatedFields)
+    }
+    
+    // Now show deductions
+    setDeductions(deductions)
+    setShowDeductions(true)
+    setMessage('')
+  }
+
+  const handleClarificationSkip = () => {
+    setShowClarificationQuestions(false)
+    setDeductions(deductions)
+    setShowDeductions(true)
+    setMessage('')
   }
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -170,6 +239,13 @@ export default function AutopilotFlow() {
           setExtractedFields(data.extractedFields)
         }
         
+        // Check if clarification questions are needed
+        const missingFields = checkForMissingFields(data.extractedFields)
+        if (missingFields.length > 0) {
+          setShowClarificationQuestions(true)
+          return
+        }
+        
         setDeductions(data.deductions)
         setShowDeductions(true)
         setMessage('')
@@ -244,6 +320,49 @@ export default function AutopilotFlow() {
       console.error('Submission error:', error)
       setSubmissionStatus('error')
       setMessage('❌ Failed to submit tax filing. Please try again.')
+    }
+  }
+
+  const handleExport = async (deductionsToExport: DeductionItem[]) => {
+    try {
+      const exportData = {
+        deductions: deductionsToExport,
+        taxYear,
+        statusKey,
+        extractedFields,
+        summary: {
+          totalDeductions: deductionsToExport.reduce((sum, item) => sum + item.deductible, 0),
+          overriddenItems: deductionsToExport.filter(item => item.isOverridden).length,
+          timestamp: new Date().toISOString()
+        }
+      }
+
+      const response = await fetch('/api/export-pdf', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(exportData)
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `tax-audit-${taxYear}-${new Date().toISOString().split('T')[0]}.html`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+
+      setMessage('✅ Audit report exported successfully!')
+    } catch (error) {
+      console.error('Export error:', error)
+      setMessage(`❌ Error exporting audit report: ${error instanceof Error ? error.message : 'Unknown error'}`)
     }
   }
 
@@ -361,10 +480,19 @@ export default function AutopilotFlow() {
           </div>
         )}
 
+        {showClarificationQuestions && (
+          <ClarificationQuestions
+            questions={checkForMissingFields(extractedFields)}
+            onComplete={handleClarificationComplete}
+            onSkip={handleClarificationSkip}
+          />
+        )}
+
         {showDeductions && deductions.length > 0 && (
           <DeductionReview
             deductions={deductions}
             onConfirm={handleConfirm}
+            onExport={handleExport}
           />
         )}
       </div>
