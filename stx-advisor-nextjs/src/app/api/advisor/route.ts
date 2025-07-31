@@ -13,6 +13,8 @@ function getOrCreateAdvisor(sessionId: string): TaxAdvisor {
     }
     console.log('Creating new TaxAdvisor instance for session:', sessionId);
     advisorSessions.set(sessionId, new TaxAdvisor(apiKey));
+  } else {
+    console.log('Using existing TaxAdvisor instance for session:', sessionId);
   }
   return advisorSessions.get(sessionId)!;
 }
@@ -71,6 +73,13 @@ export async function POST(request: NextRequest) {
           extractedData: advisor.getUserData(),
           deductionAnswers: advisor.getDeductionAnswers()
         });
+        
+        // If this is the first message and we have extracted data, initialize the conversation
+        if (advisor.getConversationHistory().length === 0 && advisor.getUserData().year) {
+          console.log('Re-initializing conversation for existing session');
+          const initialMessage = await advisor.nextAdvisorMessage();
+          advisor.addAgentMessage(initialMessage);
+        }
         
         if (message) {
           advisor.addUserMessage(message);
