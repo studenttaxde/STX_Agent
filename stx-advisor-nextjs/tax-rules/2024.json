@@ -4,6 +4,7 @@
     "label": "Work-related expenses",
     "categories": ["all"],
     "cap": 1200,
+    "formula": "totalIncome * 0.05",
     "qualifiers": [
       { "key": "amount_paid", "source": "werbungskosten" }
     ]
@@ -12,6 +13,7 @@
     "label": "Social insurance contributions",
     "categories": ["all"],
     "cap": 5000,
+    "formula": "sozialversicherung",
     "qualifiers": [
       { "key": "amount_paid", "source": "sozialversicherung" }
     ]
@@ -20,6 +22,7 @@
     "label": "Special expenses",
     "categories": ["bachelor", "master", "graduate_same_year"],
     "cap": 3000,
+    "formula": "incomeTax + solidaritySurcharge",
     "qualifiers": [
       { "key": "amount_paid", "source": "sonderausgaben" }
     ]

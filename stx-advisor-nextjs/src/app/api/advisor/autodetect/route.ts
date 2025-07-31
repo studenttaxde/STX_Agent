@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { loadRulesForYear, filterCategories, computeDeductions, type YearRules, type RuleConfig, type DeductionResult } from '@/lib/taxAdvisor'
+import { parseLohnsteuerbescheinigung, type ExtractedFields } from '@/lib/pdfParser'
 
 interface DeductionItem {
   category: string
@@ -15,19 +16,13 @@ interface ExtractedData {
   [key: string]: number
 }
 
-// Stub implementation for parsing PDF
-function parseLohnsteuerbescheinigung(buffer: ArrayBuffer): Record<string, number> {
-  // This would contain actual PDF parsing logic
-  // For now, return mock data with realistic income
+// Convert ExtractedFields to Record<string, number> for compatibility
+function convertExtractedFields(fields: ExtractedFields): Record<string, number> {
   return {
-    totalIncome: 35000,
-    bruttoarbeitslohn: 35000,
-    lohnsteuer: 6500,
-    solidaritaetszuschlag: 357,
-    krankenversicherung: 2800,
-    rentenversicherung: 3200,
-    arbeitslosenversicherung: 700,
-    pflegeversicherung: 400
+    totalIncome: fields.totalIncome,
+    werbungskosten: fields.werbungskosten,
+    sozialversicherung: fields.sozialversicherung,
+    sonderausgaben: fields.sonderausgaben
   }
 }
 
@@ -65,10 +60,11 @@ export async function POST(request: NextRequest) {
       // For testing, process any file type
       // In production, this should only process PDFs
       const buffer = await pdfFile.arrayBuffer()
-      const parsed = parseLohnsteuerbescheinigung(buffer)
+      const parsed = await parseLohnsteuerbescheinigung(buffer)
+      const converted = convertExtractedFields(parsed)
       
       // Aggregate the data
-      Object.entries(parsed).forEach(([key, value]) => {
+      Object.entries(converted).forEach(([key, value]) => {
         if (typeof value === 'number') {
           aggregatedData[key] = (aggregatedData[key] || 0) + value
         }

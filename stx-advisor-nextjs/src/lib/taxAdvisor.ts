@@ -21,6 +21,7 @@ export interface RuleConfig {
   label: string;
   categories: string[];
   cap: number | null;
+  formula?: string;
   qualifiers: { key: string; source: string }[];
 }
 
@@ -38,6 +39,52 @@ export interface DeductionResult {
   rationale: string;
 }
 
+// Helper function to compute income tax using 2024 German brackets
+export function computeIncomeTax(totalIncome: number): number {
+  if (totalIncome <= 11000) {
+    return 0;
+  } else if (totalIncome <= 18000) {
+    return (totalIncome - 11000) * 0.14;
+  } else if (totalIncome <= 31000) {
+    return (18000 - 11000) * 0.14 + (totalIncome - 18000) * 0.24;
+  } else {
+    return (18000 - 11000) * 0.14 + (31000 - 18000) * 0.24 + (totalIncome - 31000) * 0.42;
+  }
+}
+
+// Helper function to compute solidarity surcharge (5.5% of income tax)
+export function computeSolidaritySurcharge(incomeTax: number): number {
+  return incomeTax * 0.055;
+}
+
+// Helper function to evaluate formula expressions
+function evaluateFormula(formula: string, extracted: Record<string, number>): number {
+  const incomeTax = computeIncomeTax(extracted.totalIncome || 0);
+  const solidaritySurcharge = computeSolidaritySurcharge(incomeTax);
+  
+  // Create a context object with all available values
+  const context = {
+    ...extracted,
+    incomeTax,
+    solidaritySurcharge
+  };
+  
+  // Replace variables in formula with their values
+  let evaluatedFormula = formula;
+  Object.entries(context).forEach(([key, value]) => {
+    const regex = new RegExp(`\\b${key}\\b`, 'g');
+    evaluatedFormula = evaluatedFormula.replace(regex, value.toString());
+  });
+  
+  try {
+    // Evaluate the mathematical expression
+    return eval(evaluatedFormula);
+  } catch (error) {
+    console.error('Error evaluating formula:', formula, error);
+    return 0;
+  }
+}
+
 export function loadRulesForYear(year: number): YearRules {
   try {
     // In a real implementation, this would read from the file system
@@ -49,6 +96,7 @@ export function loadRulesForYear(year: number): YearRules {
           label: "Work-related expenses",
           categories: ["all"],
           cap: 1200,
+          formula: "totalIncome * 0.05",
           qualifiers: [
             { key: "amount_paid", source: "werbungskosten" }
           ]
@@ -57,6 +105,7 @@ export function loadRulesForYear(year: number): YearRules {
           label: "Social insurance contributions",
           categories: ["all"],
           cap: 5000,
+          formula: "sozialversicherung",
           qualifiers: [
             { key: "amount_paid", source: "sozialversicherung" }
           ]
@@ -65,6 +114,7 @@ export function loadRulesForYear(year: number): YearRules {
           label: "Special expenses",
           categories: ["bachelor", "master", "graduate_same_year"],
           cap: 3000,
+          formula: "incomeTax + solidaritySurcharge",
           qualifiers: [
             { key: "amount_paid", source: "sonderausgaben" }
           ]
@@ -79,6 +129,7 @@ export function loadRulesForYear(year: number): YearRules {
         label: "Work-related expenses",
         categories: ["all"],
         cap: 1200,
+        formula: "totalIncome * 0.05",
         qualifiers: [
           { key: "amount_paid", source: "werbungskosten" }
         ]
@@ -93,6 +144,7 @@ export function loadRulesForYear(year: number): YearRules {
         label: "Work-related expenses",
         categories: ["all"],
         cap: 1200,
+        formula: "totalIncome * 0.05",
         qualifiers: [
           { key: "amount_paid", source: "werbungskosten" }
         ]
@@ -132,31 +184,30 @@ export function computeDeductions(
       key.toLowerCase().includes(rule.label.toLowerCase().split(' ')[0].toLowerCase())
     ) || 'unknown'
     
-    // Calculate basis from extracted data
+    // Calculate basis using formula or fallback to extracted data
     let basis = 0
     let rationale = ''
     
-    // Werbungskosten calculation
-    if (rule.label.toLowerCase().includes('work-related')) {
-      basis = Math.min(1200, (extracted.totalIncome || 0) * 0.05) // 5% of income or 1200€ max
-      rationale = `Calculated as 5% of total income (€${extracted.totalIncome || 0}) or €1,200 maximum`
-    }
-    // Sozialversicherung calculation
-    else if (rule.label.toLowerCase().includes('social insurance')) {
-      basis = (extracted.krankenversicherung || 0) + 
-              (extracted.rentenversicherung || 0) + 
-              (extracted.arbeitslosenversicherung || 0) + 
-              (extracted.pflegeversicherung || 0)
-      rationale = `Sum of all social insurance contributions: health (€${extracted.krankenversicherung || 0}), pension (€${extracted.rentenversicherung || 0}), unemployment (€${extracted.arbeitslosenversicherung || 0}), care (€${extracted.pflegeversicherung || 0})`
-    }
-    // Sonderausgaben calculation
-    else if (rule.label.toLowerCase().includes('special expenses')) {
-      basis = (extracted.lohnsteuer || 0) + (extracted.solidaritaetszuschlag || 0)
-      rationale = `Sum of income tax (€${extracted.lohnsteuer || 0}) and solidarity surcharge (€${extracted.solidaritaetszuschlag || 0})`
+    if (rule.formula) {
+      // Use formula evaluation
+      basis = evaluateFormula(rule.formula, extracted)
+      rationale = `Computed formula: €${basis.toFixed(2)} from ${rule.formula}`
+    } else {
+      // Fallback to amount_paid from qualifiers
+      const amountPaid = rule.qualifiers.find(q => q.key === 'amount_paid')
+      if (amountPaid) {
+        basis = extracted[amountPaid.source] || 0
+        rationale = `Using extracted ${amountPaid.source}: €${basis.toFixed(2)}`
+      }
     }
     
     if (basis > 0) {
       const deductible = rule.cap ? Math.min(basis, rule.cap) : basis
+      
+      // Update rationale with cap information
+      if (rule.cap && basis > rule.cap) {
+        rationale += ` (capped at €${rule.cap.toFixed(2)})`
+      }
       
       deductions.push({
         categoryKey: categoryKey,
