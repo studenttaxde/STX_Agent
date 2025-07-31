@@ -66,6 +66,12 @@ export async function POST(request: NextRequest) {
 
       case 'respond':
         console.log('Processing user response:', message);
+        console.log('Current advisor state:', {
+          messagesCount: advisor.getConversationHistory().length,
+          extractedData: advisor.getUserData(),
+          deductionAnswers: advisor.getDeductionAnswers()
+        });
+        
         if (message) {
           advisor.addUserMessage(message);
         }

@@ -363,6 +363,7 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
     if (!year) return false;
     
     const threshold = TaxAdvisor.TAX_FREE_THRESHOLDS[year];
+    console.log(`Threshold check: year=${year}, income=${grossIncome}, threshold=${threshold}, isBelow=${threshold !== undefined && grossIncome < threshold}`);
     return threshold !== undefined && grossIncome < threshold;
   }
 
