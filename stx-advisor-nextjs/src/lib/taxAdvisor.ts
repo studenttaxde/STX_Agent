@@ -630,6 +630,7 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
     console.log('Current question index:', this.state.currentQuestionIndex);
     console.log('Deduction flow:', this.state.deductionFlow ? 'set' : 'null');
     console.log('Done state:', this.state.done);
+    console.log('All messages:', this.state.messages.map(m => `${m.sender}: ${m.text.substring(0, 50)}...`));
 
     try {
       // Initial message: Display summary and confirm year
