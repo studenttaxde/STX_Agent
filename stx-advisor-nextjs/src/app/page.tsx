@@ -13,7 +13,6 @@ import {
 } from '@/lib/supabaseService'
 import Tabs from '@/components/Tabs'
 import AutopilotFlow from './autopilot/page'
-import AutopilotHarness from '@/components/AutopilotHarness'
 
 // Generate a simple user ID based on browser fingerprint or create a new one
 const generateUserId = (): string => {
@@ -661,11 +660,6 @@ export default function TaxAdvisorApp() {
               key: 'autopilot', 
               label: 'Autopilot', 
               content: <AutopilotFlow />
-            },
-            { 
-              key: 'harness', 
-              label: 'Harness', 
-              content: <AutopilotHarness />
             }
           ]}
           defaultTab="advisor"
