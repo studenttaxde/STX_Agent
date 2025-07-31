@@ -98,12 +98,12 @@ function AdvisorChat() {
     if (!files || files.length === 0) return
 
     // Validate files before processing
-    const maxFiles = 10
+    const maxFiles = 5 // Reduced to 5 files to prevent timeouts
     const maxFileSize = 10 * 1024 * 1024 // 10MB
     const maxTotalSize = 50 * 1024 * 1024 // 50MB
 
     if (files.length > maxFiles) {
-      alert(`Please select no more than ${maxFiles} files`)
+      alert(`Please select no more than ${maxFiles} files to prevent timeouts`)
       return
     }
 
@@ -135,7 +135,7 @@ function AdvisorChat() {
       // Add retry logic for production timeouts
       let response: Response | undefined
       let retryCount = 0
-      const maxRetries = 2
+      const maxRetries = 1 // Reduced retries to prevent timeouts
 
       while (retryCount <= maxRetries) {
         try {
@@ -148,11 +148,11 @@ function AdvisorChat() {
         } catch (error) {
           retryCount++
           if (retryCount > maxRetries) {
-            throw new Error(`Request failed after ${maxRetries + 1} attempts. Please try with fewer files or smaller files.`)
+            throw new Error(`Request failed after ${maxRetries + 1} attempts. Please try with fewer files (max 5) or smaller files.`)
           }
           setProcessingStatus(`Retrying... (attempt ${retryCount + 1}/${maxRetries + 1})`)
           // Wait before retrying
-          await new Promise(resolve => setTimeout(resolve, 2000 * retryCount))
+          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount))
         }
       }
 
