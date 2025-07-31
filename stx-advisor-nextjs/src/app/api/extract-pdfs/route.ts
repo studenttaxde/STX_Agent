@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { config } from '@/lib/config'
 
-export const maxDuration = 30 // Extend to 30 seconds for Netlify
+export const maxDuration = 60 // Extend to 60 seconds for Netlify
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,18 +12,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No files provided' }, { status: 400 })
     }
 
+    console.log(`Processing ${files.length} files`)
+
     // Process files sequentially to avoid overwhelming the backend
     const results = []
     const failedResults = []
 
-    for (const file of files) {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i]
+      console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`)
+      
       try {
         const formDataToSend = new FormData()
         formDataToSend.append('file', file)
 
-        // Use a shorter timeout for each individual file
+        // Use a longer timeout for each individual file (40 seconds)
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 25000) // 25 second timeout per file
+        const timeoutId = setTimeout(() => controller.abort(), 40000) // 40 second timeout per file
 
         const response = await fetch(`${config.backendUrl}/extract-text`, {
           method: 'POST',
@@ -54,13 +59,15 @@ export async function POST(request: NextRequest) {
           data: result
         })
 
+        console.log(`Successfully processed ${file.name}`)
+
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') {
-          console.error(`Timeout for ${file.name} after 25 seconds`)
+          console.error(`Timeout for ${file.name} after 40 seconds`)
           failedResults.push({
             filename: file.name,
             success: false,
-            error: 'Request timed out after 25 seconds. Please try with a smaller file.'
+            error: 'Request timed out after 40 seconds. Please try with a smaller file or fewer files.'
           })
         } else {
           console.error(`Error processing ${file.name}:`, error)
@@ -71,7 +78,14 @@ export async function POST(request: NextRequest) {
           })
         }
       }
+
+      // Add a small delay between files to prevent overwhelming the backend
+      if (i < files.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
     }
+
+    console.log(`Completed processing. Successful: ${results.length}, Failed: ${failedResults.length}`)
 
     // Check if any files were processed successfully
     if (results.length === 0) {

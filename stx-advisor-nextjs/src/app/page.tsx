@@ -94,8 +94,31 @@ export default function TaxAdvisorApp() {
   const handleFileUpload = async (files: FileList) => {
     if (!files || files.length === 0) return
 
+    // Validate files before processing
+    const fileArray = Array.from(files)
+    const maxFileSize = 10 * 1024 * 1024 // 10MB per file
+    const maxFiles = 10 // Maximum 10 files at once
+    
+    if (fileArray.length > maxFiles) {
+      alert(`Too many files selected. Please upload a maximum of ${maxFiles} files at once.`)
+      return
+    }
+
+    const oversizedFiles = fileArray.filter(file => file.size > maxFileSize)
+    if (oversizedFiles.length > 0) {
+      alert(`Some files are too large:\n${oversizedFiles.map(f => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)}MB)`).join('\n')}\n\nPlease use files smaller than 10MB each.`)
+      return
+    }
+
+    const totalSize = fileArray.reduce((sum, file) => sum + file.size, 0)
+    const maxTotalSize = 50 * 1024 * 1024 // 50MB total
+    if (totalSize > maxTotalSize) {
+      alert(`Total file size (${(totalSize / 1024 / 1024).toFixed(1)}MB) is too large. Please upload files with a total size less than 50MB.`)
+      return
+    }
+
     setState(prev => ({ ...prev, loading: true }))
-    setProcessingStatus('Preparing files for upload...')
+    setProcessingStatus(`Preparing ${files.length} files for upload...`)
 
     try {
       const formData = new FormData()
@@ -103,7 +126,7 @@ export default function TaxAdvisorApp() {
         formData.append('files', file)
       })
 
-      setProcessingStatus('Uploading files to server...')
+      setProcessingStatus(`Uploading ${files.length} files to server...`)
 
       // Add retry logic for production timeouts
       let response: Response | undefined
@@ -112,20 +135,20 @@ export default function TaxAdvisorApp() {
 
       while (retryCount <= maxRetries) {
         try {
-          setProcessingStatus(`Processing documents... (attempt ${retryCount + 1}/${maxRetries + 1})`)
+          setProcessingStatus(`Processing ${files.length} documents... (attempt ${retryCount + 1}/${maxRetries + 1})`)
           response = await fetch('/api/extract-pdfs', {
-        method: 'POST',
-        body: formData
+            method: 'POST',
+            body: formData
           })
           break // Success, exit retry loop
         } catch (error) {
           retryCount++
           if (retryCount > maxRetries) {
-            throw new Error('Request failed after multiple attempts. Please try again.')
+            throw new Error(`Request failed after ${maxRetries + 1} attempts. Please try with fewer files or smaller files.`)
           }
           setProcessingStatus(`Retrying... (attempt ${retryCount + 1}/${maxRetries + 1})`)
           // Wait before retrying
-          await new Promise(resolve => setTimeout(resolve, 1000 * retryCount))
+          await new Promise(resolve => setTimeout(resolve, 2000 * retryCount))
         }
       }
 
@@ -148,7 +171,20 @@ export default function TaxAdvisorApp() {
 
       // Aggregate the results from successful extractions
       const successfulResults = data.results || []
+      const failedResults = data.failed || []
+      
       console.log('Successful results:', successfulResults)
+      console.log('Failed results:', failedResults)
+      
+      if (successfulResults.length === 0) {
+        throw new Error('No files were processed successfully. Please try again with different files.')
+      }
+
+      // Show warning if some files failed
+      if (failedResults.length > 0) {
+        console.warn(`${failedResults.length} files failed to process:`, failedResults)
+        setProcessingStatus(`Warning: ${failedResults.length} files failed to process. Continuing with ${successfulResults.length} successful files...`)
+      }
       
       let totalGrossIncome = 0
       let totalIncomeTaxPaid = 0
@@ -310,27 +346,18 @@ export default function TaxAdvisorApp() {
           ...prev,
           messages: [
             { sender: 'assistant', text: 'Hello! I\'ve analyzed your tax documents. Let me help you with your tax filing process. Please confirm the tax year and I\'ll guide you through the deductions.' }
-            ]
+          ]
         }))
       }
 
     } catch (error) {
-      console.error('Error processing files:', error)
+      console.error('File upload error:', error)
       setState(prev => ({ ...prev, loading: false }))
       setProcessingStatus('')
       
-      let errorMessage = 'Failed to process files. '
-      if (error instanceof Error) {
-        if (error.message.includes('timeout') || error.message.includes('Failed to fetch')) {
-          errorMessage += 'The request timed out. Please try again with fewer files or check your connection.'
-        } else if (error.message.includes('Extraction failed')) {
-          errorMessage += 'The PDF extraction failed. Please ensure your files are valid German tax documents.'
-        } else {
-          errorMessage += error.message
-        }
-      }
-      
-      alert(errorMessage)
+      // Show user-friendly error message
+      const errorMessage = error instanceof Error ? error.message : 'Upload failed'
+      alert(`Upload failed: ${errorMessage}\n\nPlease try:\n- Uploading fewer files at once (max 10)\n- Using smaller PDF files (max 10MB each)\n- Checking your internet connection`)
     }
   }
 
