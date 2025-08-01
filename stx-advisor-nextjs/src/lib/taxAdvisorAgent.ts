@@ -15,7 +15,6 @@ import {
   DeductionSummary,
   TaxAdvisorState
 } from '@/types';
-import { TaxAdvisor } from './taxAdvisor';
 import { supabase } from './supabase';
 import { SupabaseService } from './supabaseService';
 
@@ -268,26 +267,37 @@ export class PflegedAgent {
         }),
         func: async (input) => {
           try {
-            const taxAdvisor = new TaxAdvisor();
-            taxAdvisor.setExtractedData({
-              gross_income: input.grossIncome,
-              income_tax_paid: input.taxPaid,
-              year: 2021, // Default year
-              employer: 'Unknown',
-              full_name: 'User'
-            });
+            // Calculate tax summary directly
+            const totalDeductions = input.deductions.reduce((sum, d) => sum + d.amount, 0);
+            const taxableIncome = Math.max(0, input.grossIncome - totalDeductions);
+            const year = this.state.extractedData?.year || 2021;
+            const threshold = PflegedAgent.TAX_FREE_THRESHOLDS[year] || 10908;
+            
+            // Check for Verlustvortrag (loss carryforward)
+            const verlustvortrag = this.state.deductionAnswers['master_verlustvortrag']?.amount || 0;
+            const finalTaxableIncome = Math.max(0, taxableIncome - verlustvortrag);
+            
+            // REFUND FIRST LOGIC: If taxable income is below threshold, full refund
+            let refund = 0;
+            if (finalTaxableIncome <= threshold) {
+              refund = input.taxPaid; // Full refund when below threshold
+            } else {
+              // If above threshold, calculate proper German tax
+              const estimatedTax = this.calculateGermanTax(finalTaxableIncome, year);
+              refund = Math.max(0, input.taxPaid - estimatedTax);
+            }
 
-            // Add deductions to state
-            input.deductions.forEach(deduction => {
-              this.state.deductionAnswers[deduction.category] = {
-                questionId: deduction.category,
-                answer: true,
-                amount: deduction.amount,
-                details: `${deduction.category} deduction`
-              };
-            });
+            const summary = {
+              grossIncome: input.grossIncome,
+              totalDeductions,
+              taxableIncome: finalTaxableIncome,
+              estimatedTax: finalTaxableIncome * 0.15,
+              taxPaid: input.taxPaid,
+              refund,
+              year
+            };
 
-            const summary = taxAdvisor.getTaxCalculation();
+            this.state.taxCalculation = summary;
             this.state.step = 'calculate';
             
             return JSON.stringify({
@@ -404,32 +414,60 @@ export class PflegedAgent {
         }),
         func: async (input) => {
           try {
-            const taxAdvisor = new TaxAdvisor();
-            
-            if (this.state.extractedData) {
-              taxAdvisor.setExtractedData(this.state.extractedData);
+            // Calculate tax summary directly
+            const totalDeductions = Object.values(this.state.deductionAnswers)
+              .filter(a => a.answer)
+              .reduce((sum, a) => sum + (a.amount || 0), 0);
+
+            if (!this.state.extractedData) {
+              throw new Error('No extracted data available');
             }
 
-            // Add deduction answers to advisor
-            Object.values(this.state.deductionAnswers).forEach(answer => {
-              // This would need to be implemented in TaxAdvisor
-            });
+            const grossIncome = this.state.extractedData.gross_income || 0;
+            const taxableIncome = Math.max(0, grossIncome - totalDeductions);
+            const taxPaid = this.state.extractedData.income_tax_paid || 0;
+            const year = this.state.extractedData.year;
+            const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 0;
+            
+            // Check for Verlustvortrag (loss carryforward)
+            const verlustvortrag = this.state.deductionAnswers['master_verlustvortrag']?.amount || 0;
+            const finalTaxableIncome = Math.max(0, taxableIncome - verlustvortrag);
+            
+            // REFUND FIRST LOGIC: If taxable income is below threshold, full refund
+            let refund = 0;
+            if (finalTaxableIncome <= threshold) {
+              refund = taxPaid; // Full refund when below threshold
+            } else {
+              // If above threshold, calculate proper German tax
+              const estimatedTax = this.calculateGermanTax(finalTaxableIncome, year);
+              refund = Math.max(0, taxPaid - estimatedTax);
+            }
 
-            const summary = taxAdvisor.getTaxCalculation();
+            const summary = {
+              grossIncome,
+              totalDeductions,
+              taxableIncome: finalTaxableIncome,
+              estimatedTax: finalTaxableIncome * 0.15,
+              taxPaid,
+              refund,
+              year: year || 0
+            };
+
+            this.state.taxCalculation = summary;
             this.state.step = 'summary';
             this.state.isComplete = true;
             
             const finalSummary = {
               user_id: input.userId,
               tax_year: input.year,
-              gross_income: summary?.grossIncome || 0,
-              tax_paid: summary?.taxPaid || 0,
-              taxable_income: summary?.taxableIncome || 0,
-              total_deductions: summary?.totalDeductions || 0,
-              loss_carryforward_used: this.state.lossCarryforward?.used || 0,
-              loss_carryforward_remaining: this.state.lossCarryforward?.remaining || 0,
-              estimated_refund: summary?.refund || 0,
-              refund_type: summary?.refund === summary?.taxPaid ? 'full' : 'partial',
+              gross_income: grossIncome,
+              tax_paid: taxPaid,
+              taxable_income: finalTaxableIncome,
+              total_deductions: totalDeductions,
+              loss_carryforward_used: verlustvortrag,
+              loss_carryforward_remaining: 0, // Will be calculated based on previous year
+              estimated_refund: refund,
+              refund_type: finalTaxableIncome <= threshold ? 'full' : (refund > 0 ? 'partial' : 'none'),
               refund_reason: this.generateRefundReason(summary),
               filing_date: new Date().toISOString().split('T')[0]
             };

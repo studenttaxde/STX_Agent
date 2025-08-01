@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { loadRulesForYear, filterCategories, computeDeductions, type YearRules, type RuleConfig, type DeductionResult } from '@/lib/taxAdvisor'
 import { parseLohnsteuerbescheinigung, type ExtractedFields } from '@/lib/pdfParser'
+import { PflegedAgent } from '@/lib/taxAdvisorAgent'
 
 interface DeductionItem {
   category: string
@@ -16,6 +16,26 @@ interface ExtractedData {
   [key: string]: number
 }
 
+// Tax rules by year
+const TAX_RULES = {
+  2021: {
+    basicAllowance: 9744,
+    categories: {
+      Werbungskosten: { maxAmount: 1000, formula: 'totalIncome * 0.05' },
+      Sozialversicherung: { maxAmount: 5000, formula: 'direct' },
+      Sonderausgaben: { maxAmount: 3000, formula: 'incomeTax * 0.1' }
+    }
+  },
+  2024: {
+    basicAllowance: 10908,
+    categories: {
+      Werbungskosten: { maxAmount: 1000, formula: 'totalIncome * 0.05' },
+      Sozialversicherung: { maxAmount: 5000, formula: 'direct' },
+      Sonderausgaben: { maxAmount: 3000, formula: 'incomeTax * 0.1' }
+    }
+  }
+}
+
 // Convert ExtractedFields to Record<string, number> for compatibility
 function convertExtractedFields(fields: ExtractedFields): Record<string, number> {
   return {
@@ -26,8 +46,75 @@ function convertExtractedFields(fields: ExtractedFields): Record<string, number>
   }
 }
 
+// Load rules for a specific year
+function loadRulesForYear(year: number) {
+  return TAX_RULES[year as keyof typeof TAX_RULES] || TAX_RULES[2024]
+}
+
+// Filter categories based on status and extracted data
+function filterCategories(rules: any, statusKey: string, extractedData: any) {
+  const categories = rules.categories
+  const filtered: any = {}
+  
+  // Map status keys to relevant categories
+  const statusCategoryMap: Record<string, string[]> = {
+    bachelor: ['Werbungskosten', 'Sozialversicherung'],
+    master: ['Werbungskosten', 'Sozialversicherung', 'Sonderausgaben'],
+    new_employee: ['Werbungskosten', 'Sozialversicherung'],
+    full_time: ['Werbungskosten', 'Sozialversicherung', 'Sonderausgaben']
+  }
+  
+  const relevantCategories = statusCategoryMap[statusKey] || ['Werbungskosten']
+  
+  relevantCategories.forEach(category => {
+    if (categories[category]) {
+      filtered[category] = categories[category]
+    }
+  })
+  
+  return filtered
+}
+
+// Compute deductions based on rules and extracted data
+function computeDeductions(filteredRules: any, extractedData: any) {
+  const deductions: any[] = []
+  
+  Object.entries(filteredRules).forEach(([category, rule]: [string, any]) => {
+    let amount = 0
+    let rationale = ''
+    
+    if (rule.formula === 'direct') {
+      // Use direct extracted value
+      amount = extractedData[category.toLowerCase()] || 0
+      rationale = `Direct extraction: €${amount}`
+    } else if (rule.formula.includes('totalIncome')) {
+      // Calculate based on total income
+      amount = Math.min(extractedData.totalIncome * 0.05, rule.maxAmount)
+      rationale = `Calculated: ${extractedData.totalIncome} * 0.05 = €${amount}`
+    } else {
+      // Default to extracted value or 0
+      amount = extractedData[category.toLowerCase()] || 0
+      rationale = `Default extraction: €${amount}`
+    }
+    
+    // Cap the amount
+    const finalAmount = Math.min(amount, rule.maxAmount)
+    
+    deductions.push({
+      categoryKey: category,
+      label: category,
+      basis: amount,
+      cap: rule.maxAmount,
+      deductible: finalAmount,
+      rationale: `${rationale} (capped at €${rule.maxAmount})`
+    })
+  })
+  
+  return deductions
+}
+
 // Convert DeductionResult to DeductionItem for compatibility
-function convertDeductionResult(result: DeductionResult): DeductionItem {
+function convertDeductionResult(result: any): DeductionItem {
   return {
     category: result.categoryKey,
     basis: result.basis,
@@ -98,50 +185,51 @@ export async function POST(request: NextRequest) {
       extractedFields.sonderausgaben += parsed.sonderausgaben
       
       // Extract employer from filename if available
-      if (pdfFile.name.toLowerCase().includes('employer')) {
-        extractedFields.employer = pdfFile.name.replace('.pdf', '').replace(/\d+/g, '').trim()
+      if (pdfFile.name.includes('_')) {
+        const parts = pdfFile.name.split('_')
+        if (parts.length > 2) {
+          extractedFields.employer = parts.slice(2, -1).join('_') || 'Unknown'
+        }
       }
     }
     
-    console.log('Processing deductions for:', { statusKey, taxYear, totalIncome: aggregatedData.totalIncome })
-    
-    // Load rules for the specified year
-    const rules = loadRulesForYear(taxYear)
-    console.log('Loaded rules for year:', taxYear, 'Basic allowance:', rules.basicAllowance)
-    
-    const filtered = filterCategories(rules, statusKey, aggregatedData)
-    console.log('Filtered categories for status:', statusKey, 'Count:', filtered.length)
-    
-    const deductionResults = computeDeductions(filtered, aggregatedData)
-    console.log('Computed deductions:', deductionResults.length, 'results')
+    console.log('Final aggregated data:', aggregatedData)
+    console.log('Extracted fields:', extractedFields)
     
     // Check if income is below basic allowance
-    if (aggregatedData.totalIncome <= rules.basicAllowance) {
+    const rules = loadRulesForYear(taxYear)
+    const basicAllowance = rules.basicAllowance
+    
+    if (aggregatedData.totalIncome <= basicAllowance) {
       return NextResponse.json({
-        message: `Your total income (€${aggregatedData.totalIncome.toLocaleString('de-DE')}) is below the basic allowance (€${rules.basicAllowance.toLocaleString('de-DE')}) for ${taxYear}. No deductions needed.`
+        message: `Your total income (€${aggregatedData.totalIncome.toLocaleString('de-DE')}) is below the basic allowance (€${basicAllowance.toLocaleString('de-DE')}). No deductions needed.`
       })
     }
     
-    // Convert DeductionResult to DeductionItem for compatibility
-    const deductions = deductionResults.map(convertDeductionResult)
-    console.log('Final deductions for frontend:', deductions)
+    // Compute deductions
+    const filtered = filterCategories(rules, statusKey, aggregatedData)
+    const deductionResults = computeDeductions(filtered, aggregatedData)
     
-    // Return deductions array with extracted fields for validation
+    // Convert to expected format
+    const deductions = deductionResults.map(convertDeductionResult)
+    
+    console.log('Computed deductions:', deductions)
+    
     return NextResponse.json({
       deductions,
       extractedFields,
       taxYear,
       summary: {
         totalIncome: aggregatedData.totalIncome,
-        basicAllowance: rules.basicAllowance,
-        year: taxYear
+        basicAllowance,
+        isBelowThreshold: false
       }
     })
     
   } catch (error) {
     console.error('Autodetect error:', error)
     return NextResponse.json(
-      { error: 'Failed to process PDFs' },
+      { error: 'Failed to process tax documents' },
       { status: 500 }
     )
   }

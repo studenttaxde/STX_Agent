@@ -1,22 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { TaxAdvisor } from '@/lib/taxAdvisor';
+import { PflegedAgent } from '@/lib/taxAdvisorAgent';
 import { ExtractedData } from '@/types';
 
-// Store advisor instances per session (in production, use Redis or database)
-const advisorSessions = new Map<string, TaxAdvisor>();
+// Store agent instances per session (in production, use Redis or database)
+const agentSessions = new Map<string, PflegedAgent>();
 
-function getOrCreateAdvisor(sessionId: string): TaxAdvisor {
-  if (!advisorSessions.has(sessionId)) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new Error('OpenAI API key not configured');
-    }
-    console.log('Creating new TaxAdvisor instance for session:', sessionId);
-    advisorSessions.set(sessionId, new TaxAdvisor(apiKey));
+function getOrCreateAgent(sessionId: string): PflegedAgent {
+  if (!agentSessions.has(sessionId)) {
+    console.log('Creating new PflegedAgent instance for session:', sessionId);
+    agentSessions.set(sessionId, new PflegedAgent());
   } else {
-    console.log('Using existing TaxAdvisor instance for session:', sessionId);
+    console.log('Using existing PflegedAgent instance for session:', sessionId);
   }
-  return advisorSessions.get(sessionId)!;
+  return agentSessions.get(sessionId)!;
 }
 
 export async function POST(request: NextRequest) {
@@ -32,30 +28,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Session ID required' }, { status: 400 });
     }
 
-    const advisor = getOrCreateAdvisor(sessionId);
+    const agent = getOrCreateAgent(sessionId);
 
     switch (action) {
       case 'initialize':
-        console.log('Initializing advisor with extracted data:', extractedData);
+        console.log('Initializing agent with extracted data:', extractedData);
         if (extractedData) {
-          advisor.setExtractedData(extractedData as ExtractedData);
+          agent.setExtractedData(extractedData as ExtractedData);
         }
         
-        // If there's existing data, inform the advisor
+        // If there's existing data, inform the agent
         if (existingData) {
-          console.log('Adding existing data to advisor:', existingData);
-          advisor.addUserMessage(`I have existing data for ${existingData.year}: Income: €${existingData.gross_income}, Tax Paid: €${existingData.income_tax_paid}, Employer: ${existingData.employer}`);
+          console.log('Adding existing data to agent:', existingData);
+          agent.addUserMessage(`I have existing data for ${existingData.year}: Income: €${existingData.gross_income}, Tax Paid: €${existingData.income_tax_paid}, Employer: ${existingData.employer}`);
         }
         
-        // If there are suggested deductions, inform the advisor
+        // If there are suggested deductions, inform the agent
         if (suggestedDeductions && suggestedDeductions.length > 0) {
-          console.log('Adding suggested deductions to advisor:', suggestedDeductions);
+          console.log('Adding suggested deductions to agent:', suggestedDeductions);
           const deductionSuggestions = suggestedDeductions.map((d: any) => `${d.category}: €${d.amount}`).join(', ');
-          advisor.addUserMessage(`Based on previous years, you commonly claimed: ${deductionSuggestions}`);
+          agent.addUserMessage(`Based on previous years, you commonly claimed: ${deductionSuggestions}`);
         }
         
-        console.log('Getting initial advisor message');
-        const initialMessage = await advisor.nextAdvisorMessage();
+        console.log('Getting initial agent message');
+        const initialMessage = await agent.runAgent('Initialize tax filing process');
         console.log('Initial message received:', initialMessage);
         
         return NextResponse.json({
@@ -68,25 +64,25 @@ export async function POST(request: NextRequest) {
 
       case 'respond':
         console.log('Processing user response:', message);
-        console.log('Current advisor state:', {
-          messagesCount: advisor.getConversationHistory().length,
-          extractedData: advisor.getUserData(),
-          deductionAnswers: advisor.getDeductionAnswers()
+        console.log('Current agent state:', {
+          messagesCount: agent.getConversationHistory().length,
+          extractedData: agent.getUserData(),
+          deductionAnswers: agent.getDeductionAnswers()
         });
         
         // If this is the first message and we have extracted data, initialize the conversation
-        if (advisor.getConversationHistory().length === 0 && advisor.getUserData().year) {
+        if (agent.getConversationHistory().length === 0 && agent.getUserData().year) {
           console.log('Re-initializing conversation for existing session');
-          const initialMessage = await advisor.nextAdvisorMessage();
-          advisor.addAgentMessage(initialMessage);
+          const initialMessage = await agent.runAgent('Initialize tax filing process');
+          agent.addAgentMessage(initialMessage);
         }
         
         if (message) {
-          advisor.addUserMessage(message);
+          agent.addUserMessage(message);
         }
 
-        console.log('Getting next advisor message');
-        const nextMessage = await advisor.nextAdvisorMessage();
+        console.log('Getting next agent message');
+        const nextMessage = await agent.runAgent(message || 'Continue conversation');
         console.log('Next message received:', nextMessage);
         
         // Check if conversation is done based on keywords and deduction flow completion
@@ -98,76 +94,34 @@ export async function POST(request: NextRequest) {
         // Check if this is a "file for another year" question
         const isAnotherYearQuestion = nextMessage.toLowerCase().includes('file a tax return for another year');
         
-        // Check if this is a reset message for new year
-        const isResetForNewYear = nextMessage.toLowerCase().includes('ready for another year') && 
-                                 nextMessage.toLowerCase().includes('upload the pdf');
-        
-        // Only mark as done if it's not asking about another year and not a reset message
-        const isDone = !isAnotherYearQuestion && !isResetForNewYear && doneKeywords.some(keyword => 
+        // Check if conversation is done
+        const isDone = doneKeywords.some(keyword => 
           nextMessage.toLowerCase().includes(keyword.toLowerCase())
-        );
-
-        console.log('Conversation done check:', { isDone, isAnotherYearQuestion, isResetForNewYear });
-
-        // Get deduction flow information
-        const deductionAnswers = advisor.getDeductionAnswers();
-        const taxCalculation = advisor.getTaxCalculation();
-        const userData = advisor.getUserData();
-
-        console.log('Deduction flow info:', { deductionAnswers, taxCalculation, userData });
-
+        ) || agent.isComplete();
+        
+        // Get current state
+        const state = agent.getState();
+        
         return NextResponse.json({
           success: true,
           message: nextMessage,
           done: isDone,
-          deduction_answers: deductionAnswers,
-          tax_calculation: taxCalculation,
-          deduction_flow: userData.status ? {
-            status: userData.status,
-            current_question_index: deductionAnswers.length,
-            total_questions: deductionAnswers.length + (isDone ? 0 : 1)
-          } : null,
-          current_question_index: deductionAnswers.length,
-          total_questions: deductionAnswers.length + (isDone ? 0 : 1)
-        });
-
-      case 'reset':
-        console.log('Resetting advisor session');
-        advisor.reset();
-        return NextResponse.json({
-          success: true,
-          message: 'Session reset successfully'
-        });
-
-      case 'get_state':
-        console.log('Getting advisor state');
-        const deductionAnswersState = advisor.getDeductionAnswers();
-        const taxCalculationState = advisor.getTaxCalculation();
-        const userDataState = advisor.getUserData();
-        
-        return NextResponse.json({
-          success: true,
-          deduction_answers: deductionAnswersState,
-          tax_calculation: taxCalculationState,
-          deduction_flow: userDataState.status ? {
-            status: userDataState.status,
-            current_question_index: deductionAnswersState.length,
-            total_questions: deductionAnswersState.length
-          } : null,
-          current_question_index: deductionAnswersState.length,
-          total_questions: deductionAnswersState.length
+          deduction_flow: state.deductionFlow,
+          current_question_index: state.currentQuestionIndex,
+          conversation_id: state.conversationId,
+          step: state.step
         });
 
       default:
-        console.error('Invalid action:', action);
-        return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
+        return NextResponse.json(
+          { error: 'Invalid action' },
+          { status: 400 }
+        );
     }
-
   } catch (error) {
     console.error('Advisor API error:', error);
-    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack trace');
     return NextResponse.json(
-      { error: `Advisor failed: ${error instanceof Error ? error.message : 'Unknown error'}` },
+      { error: 'Internal server error' },
       { status: 500 }
     );
   }
@@ -177,22 +131,22 @@ export async function DELETE(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const sessionId = searchParams.get('sessionId');
-
+    
     if (!sessionId) {
       return NextResponse.json({ error: 'Session ID required' }, { status: 400 });
     }
-
-    advisorSessions.delete(sessionId);
     
-    return NextResponse.json({
-      success: true,
-      message: 'Session deleted successfully'
-    });
-
+    // Remove the session from memory
+    if (agentSessions.has(sessionId)) {
+      agentSessions.delete(sessionId);
+      console.log('Removed agent session:', sessionId);
+    }
+    
+    return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Session deletion error:', error);
+    console.error('Delete session error:', error);
     return NextResponse.json(
-      { error: `Session deletion failed: ${error instanceof Error ? error.message : 'Unknown error'}` },
+      { error: 'Failed to delete session' },
       { status: 500 }
     );
   }
