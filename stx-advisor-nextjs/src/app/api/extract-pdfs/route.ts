@@ -12,9 +12,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No files provided' }, { status: 400 })
     }
 
-    console.log(`Processing ${files.length} files`)
+    console.log(`Processing ${files.length} files with reliable extraction`)
 
-    // Process files with faster, more reliable extraction
+    // Process files with robust, reliable extraction
     const results = []
     const failedResults = []
 
@@ -23,52 +23,103 @@ export async function POST(request: NextRequest) {
       console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`)
       
       try {
-        // Try backend extraction with shorter timeout
-        const backendResult = await tryBackendExtraction(file)
-        if (backendResult.success) {
-          results.push(backendResult)
-          console.log(`Backend extraction successful for ${file.name}`)
+        // Try reliable backend extraction with retries
+        const extractionResult = await tryReliableExtraction(file)
+        if (extractionResult.success) {
+          results.push(extractionResult)
+          console.log(`Reliable extraction successful for ${file.name}`)
         } else {
-          // If backend fails, create a basic result from filename
-          console.log(`Backend failed for ${file.name}, creating basic result`)
-          const basicResult = createBasicResult(file)
-          results.push(basicResult)
+          failedResults.push({
+            filename: file.name,
+            success: false,
+            error: 'error' in extractionResult ? extractionResult.error : 'Extraction failed'
+          })
         }
 
       } catch (error) {
         console.error(`Error processing ${file.name}:`, error)
-        // Create basic result instead of failing
-        console.log(`Creating basic result for ${file.name} due to error`)
-        const basicResult = createBasicResult(file)
-        results.push(basicResult)
+        failedResults.push({
+          filename: file.name,
+          success: false,
+          error: error instanceof Error ? error.message : 'Extraction failed'
+        })
       }
 
-      // Shorter delay between files
+      // Minimal delay between files
       if (i < files.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 200))
+        await new Promise(resolve => setTimeout(resolve, 100))
       }
     }
 
     console.log(`Completed processing. Successful: ${results.length}, Failed: ${failedResults.length}`)
 
-    // Always return success with results
+    // Return detailed results
+    if (results.length === 0) {
+      return NextResponse.json({
+        error: 'All files failed to process',
+        details: failedResults
+      }, { status: 500 })
+    }
+
+    if (failedResults.length > 0) {
+      return NextResponse.json({
+        success: true,
+        message: `Processed ${results.length} files successfully, ${failedResults.length} failed`,
+        results: results,
+        failed: failedResults
+      })
+    }
+
     return NextResponse.json({
       success: true,
-      message: `Processed ${results.length} files`,
       results: results
     })
 
   } catch (error) {
     console.error('PDF extraction error:', error)
-    // Return basic results instead of error
-    const formData = await request.formData()
-    const files = formData.getAll('files') as File[]
-    const basicResults = files.map(file => createBasicResult(file))
     return NextResponse.json({
-      success: true,
-      message: 'Using basic extraction due to processing error',
-      results: basicResults
-    })
+      error: 'Extraction failed',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 })
+  }
+}
+
+async function tryReliableExtraction(file: File) {
+  const maxRetries = 2
+  let lastError: Error | null = null
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`Attempt ${attempt}/${maxRetries} for ${file.name}`)
+      
+      // Try backend extraction with optimized timeout
+      const result = await tryBackendExtraction(file)
+      if (result.success) {
+        return result
+      }
+      
+      // If backend returns success: false, try again
+      if (attempt < maxRetries) {
+        console.log(`Backend returned failure, retrying in 1 second...`)
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+      
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error('Unknown error')
+      console.log(`Attempt ${attempt} failed for ${file.name}:`, lastError.message)
+      
+      if (attempt < maxRetries) {
+        console.log(`Retrying in 1 second...`)
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+    }
+  }
+
+  // All attempts failed
+  return {
+    filename: file.name,
+    success: false,
+    error: lastError?.message || 'All extraction attempts failed'
   }
 }
 
@@ -76,11 +127,13 @@ async function tryBackendExtraction(file: File) {
   const formDataToSend = new FormData()
   formDataToSend.append('file', file)
 
-  // Use a shorter timeout for faster processing (10 seconds)
+  // Optimized timeout for reliable extraction (15 seconds)
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 10000)
+  const timeoutId = setTimeout(() => controller.abort(), 15000)
 
   try {
+    console.log(`Sending ${file.name} to backend service`)
+    
     const response = await fetch(`${config.backendUrl}/extract-text`, {
       method: 'POST',
       body: formDataToSend,
@@ -93,10 +146,17 @@ async function tryBackendExtraction(file: File) {
     clearTimeout(timeoutId)
 
     if (!response.ok) {
-      throw new Error(`Backend error: ${response.status}`)
+      throw new Error(`Backend service error: ${response.status} ${response.statusText}`)
     }
 
     const result = await response.json()
+    console.log(`Backend extraction result for ${file.name}:`, result)
+    
+    // Validate the result has required fields
+    if (!result || typeof result !== 'object') {
+      throw new Error('Invalid response format from backend service')
+    }
+
     return {
       filename: file.name,
       success: true,
@@ -105,36 +165,15 @@ async function tryBackendExtraction(file: File) {
 
   } catch (error) {
     clearTimeout(timeoutId)
+    
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('Backend request timed out')
+      throw new Error('Backend service request timed out')
     }
+    
+    if (error instanceof Error && error.message.includes('fetch')) {
+      throw new Error('Backend service is unavailable')
+    }
+    
     throw error
-  }
-}
-
-function createBasicResult(file: File) {
-  // Extract year from filename
-  const yearMatch = file.name.match(/(20\d{2})/)
-  const year = yearMatch ? parseInt(yearMatch[1]) : 2021
-  
-  // Extract employer from filename
-  const employerMatch = file.name.match(/([A-Za-z\s]+?)_\d{4}/)
-  const employer = employerMatch ? employerMatch[1].replace('_', ' ').trim() : 'Unknown Employer'
-  
-  return {
-    filename: file.name,
-    success: true,
-    data: {
-      bruttolohn: 50000,
-      bruttoarbeitslohn: 50000,
-      gross_income: 50000,
-      lohnsteuer: 8000,
-      income_tax_paid: 8000,
-      employer: employer,
-      year: year,
-      werbungskosten: 0,
-      sozialversicherung: 7100,
-      sonderausgaben: 6857
-    }
   }
 }
