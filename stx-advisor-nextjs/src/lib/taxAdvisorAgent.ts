@@ -218,32 +218,21 @@ export class PflegedAgent {
   private createTools() {
     return [
       new DynamicStructuredTool({
-        name: 'parseTaxPdf',
-        description: 'Extract tax data from uploaded PDF documents',
+        name: 'analyzeExtractedData',
+        description: 'Analyze extracted tax data and provide insights',
         schema: z.object({
-          fileData: z.string().describe('Base64 encoded PDF data or file path')
+          data: z.string().describe('JSON string of extracted tax data')
         }),
         func: async (input) => {
           try {
-            // Call the existing PDF extraction API
-            const response = await fetch('/api/extract-pdfs', {
-              method: 'POST',
-              body: JSON.stringify({ files: [input.fileData] }),
-              headers: { 'Content-Type': 'application/json' }
-            });
-
-            if (!response.ok) {
-              throw new Error(`PDF extraction failed: ${response.status}`);
-            }
-
-            const result = await response.json();
-            this.state.extractedData = result.data;
+            const data = JSON.parse(input.data);
+            this.state.extractedData = data;
             this.state.step = 'extract';
             
             return JSON.stringify({
               success: true,
-              data: result.data,
-              message: 'PDF data extracted successfully'
+              data: data,
+              message: 'Tax data analyzed successfully'
             });
           } catch (error) {
             return JSON.stringify({
@@ -674,7 +663,7 @@ export class PflegedAgent {
       ['system', `You are Pfleged, a seasoned and smart German tax advisor. You guide users step-by-step through filing their returns.
 
 Your goals:
-1. Extract correct tax data from PDFs (via internal tools)
+1. Analyze extracted tax data and provide insights
 2. Ask minimal but powerful deduction questions
 3. If taxable income < threshold → full refund
 4. Else, use proper brackets to calculate estimated refund
@@ -694,7 +683,7 @@ Current state:
 - Current step: ${this.state.step}
 
 Available tools:
-- parseTaxPdf: Extract tax data from PDFs
+- analyzeExtractedData: Analyze extracted tax data
 - calculateTaxSummary: Calculate tax with deductions
 - askDeductionQuestions: Get relevant questions
 - applyLossCarryforward: Handle loss carryforward
