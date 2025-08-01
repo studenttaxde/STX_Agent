@@ -359,9 +359,15 @@ export class TaxAdvisor {
           question: 'Did you have research-related expenses (conferences, publications)?',
           category: 'Research',
           maxAmount: 2000
+        },
+        {
+          id: 'master_verlustvortrag',
+          question: 'Do you have any loss carryforward (Verlustvortrag) from previous years? This is crucial for master\'s students who may have had losses during bachelor studies.',
+          category: 'Loss Carryforward',
+          maxAmount: 10000
         }
       ],
-      order: ['master_tuition', 'master_books', 'master_travel', 'master_work', 'master_research']
+      order: ['master_tuition', 'master_books', 'master_travel', 'master_work', 'master_research', 'master_verlustvortrag']
     },
     new_employee: {
       status: 'new_employee',
@@ -1022,9 +1028,13 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
     const year = this.state.extractedData.year;
     const threshold = year ? TaxAdvisor.TAX_FREE_THRESHOLDS[year] : 0;
     
+    // Check for Verlustvortrag (loss carryforward)
+    const verlustvortrag = this.state.deductionAnswers['master_verlustvortrag']?.amount || 0;
+    const finalTaxableIncome = Math.max(0, taxableIncome - verlustvortrag);
+    
     // REFUND FIRST LOGIC: If taxable income is below threshold, full refund
-    if (taxableIncome <= threshold) {
-      console.log(`Taxable income (${taxableIncome}) is below threshold (${threshold}), full refund applies`);
+    if (finalTaxableIncome <= threshold) {
+      console.log(`Taxable income (${finalTaxableIncome}) is below threshold (${threshold}), full refund applies`);
       const deductions = Object.values(this.state.deductionAnswers)
         .filter(a => a.answer)
         .map(a => {
@@ -1037,17 +1047,18 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
         });
 
       return {
-        totalDeductions,
+        totalDeductions: totalDeductions + verlustvortrag,
         deductions,
-        taxableIncome,
+        taxableIncome: finalTaxableIncome,
         refund: taxPaid, // Full refund when below threshold
         isBelowThreshold: true,
-        threshold
+        threshold,
+        verlustvortrag
       };
     }
     
     // If above threshold, calculate proper German tax
-    const estimatedTax = this.calculateGermanTax(taxableIncome, year);
+    const estimatedTax = this.calculateGermanTax(finalTaxableIncome, year);
     const refund = Math.max(0, taxPaid - estimatedTax);
 
     const deductions = Object.values(this.state.deductionAnswers)
@@ -1062,13 +1073,14 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
       });
 
     return {
-      totalDeductions,
+      totalDeductions: totalDeductions + verlustvortrag,
       deductions,
-      taxableIncome,
+      taxableIncome: finalTaxableIncome,
       refund,
       isBelowThreshold: false,
       threshold,
-      estimatedTax
+      estimatedTax,
+      verlustvortrag
     };
   }
 
@@ -1110,13 +1122,20 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
     if (summary.isBelowThreshold) {
       result += `## ✅ **Full Refund Explanation**\n`;
       result += `Since your taxable income (€${summary.taxableIncome.toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is below the tax-free threshold (€${threshold.toLocaleString('de-DE')}) for ${year}, you are entitled to a **full refund** of the €${Number(income_tax_paid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })} tax you paid.\n\n`;
-      result += `**Why this applies:** Your income after deductions is below the minimum threshold, so no tax should have been paid.\n\n`;
+      result += `**Why this applies:** Your income after deductions and loss carryforward is below the minimum threshold, so no tax should have been paid.\n\n`;
     } else {
       result += `## 📊 **Refund Calculation Explanation**\n`;
       result += `Since your taxable income (€${summary.taxableIncome.toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is above the tax-free threshold (€${threshold.toLocaleString('de-DE')}), your refund is calculated as:\n`;
       result += `**Tax Paid:** €${Number(income_tax_paid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n`;
       result += `**Estimated Tax Due:** €${summary.estimatedTax?.toLocaleString('de-DE', { minimumFractionDigits: 2 }) || '0,00'}\n`;
       result += `**Refund:** €${summary.refund.toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n\n`;
+    }
+
+    // Add Verlustvortrag information if applicable
+    if (summary.verlustvortrag && summary.verlustvortrag > 0) {
+      result += `## 📋 **Loss Carryforward (Verlustvortrag)**\n`;
+      result += `**Loss Carryforward Applied:** €${summary.verlustvortrag.toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n`;
+      result += `This reduces your taxable income and can significantly increase your refund, especially for master's students who may have had losses during bachelor studies.\n\n`;
     }
 
     // Detailed expense breakdown
@@ -1377,11 +1396,16 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
           const result = "Great! Please upload the PDF for the new year you want to file.";
           this.addAgentMessage(result);
           return result;
-        } else {
+        } else if (lastUserMessage && /^(no|n|nope|not|false)$/i.test(lastUserMessage)) {
           console.log('User does not want to file for another year, ending session');
           const result = "Thank you for using our tax advisor! Your filing is complete.";
           this.addAgentMessage(result);
           this.state.done = true;
+          return result;
+        } else {
+          // If user didn't give a clear yes/no, ask for clarification
+          const result = "Please answer 'yes' if you want to file for another year, or 'no' to finish.";
+          this.addAgentMessage(result);
           return result;
         }
       }

@@ -73,6 +73,7 @@ export interface DeductionSummary {
   isBelowThreshold?: boolean;
   threshold?: number;
   estimatedTax?: number;
+  verlustvortrag?: number;
 }
 
 // Single PDF extraction result
