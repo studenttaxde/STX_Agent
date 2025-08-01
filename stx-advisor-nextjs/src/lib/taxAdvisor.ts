@@ -1182,6 +1182,8 @@ Please select your status for the year:
 3. **new_employee** (Started job after graduation)
 4. **full_time** (Full-time employee)`;
             this.addAgentMessage(nextQuestion);
+            // Set a flag to indicate we're now in status selection
+            this.state.currentQuestionIndex = 1;
             return nextQuestion;
           }
         }
@@ -1199,8 +1201,8 @@ Please select your status for the year:
         }
       }
       
-      // If we have a deduction flow but no current question, we're in status selection
-      if (this.state.deductionFlow && this.state.currentQuestionIndex === 0) {
+      // If we have extracted data and currentQuestionIndex > 0, we're in status selection
+      if (this.state.extractedData && !this.state.deductionFlow && this.state.currentQuestionIndex > 0) {
         console.log('In status selection phase');
         let status: UserStatus | null = null;
         
