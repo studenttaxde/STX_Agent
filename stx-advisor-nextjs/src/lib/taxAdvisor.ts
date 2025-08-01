@@ -1393,12 +1393,12 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
         if (lastUserMessage && /^(yes|y|yeah|sure|ok)$/i.test(lastUserMessage)) {
           console.log('User wants to file for another year, resetting state');
           this.resetForNewYear();
-          const result = "Great! Please upload the PDF for the new year you want to file.";
+          const result = "Perfect! I've reset the system for a new year. Please upload the PDF for the new year you want to file, and I'll help you with that tax return.";
           this.addAgentMessage(result);
           return result;
         } else if (lastUserMessage && /^(no|n|nope|not|false)$/i.test(lastUserMessage)) {
           console.log('User does not want to file for another year, ending session');
-          const result = "Thank you for using our tax advisor! Your filing is complete.";
+          const result = "Thank you for using our tax advisor! Your filing is complete. You can always come back to file for another year later.";
           this.addAgentMessage(result);
           this.state.done = true;
           return result;
@@ -1507,23 +1507,26 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
     // Preserve filed years but clear current year data
     const preservedFiledSummaries = [...this.state.filedSummaries];
     
+    // Clear all state except filed summaries
     this.state = {
-      messages: [],
+      messages: [], // Start fresh conversation
       loading: false,
       step: 'upload',
-      extractedData: null,
+      extractedData: null, // Clear extracted data for new year
       multiPDFData: null,
       filedSummaries: preservedFiledSummaries, // Keep filedSummaries across resets
-      deductionAnswers: {},
-      currentQuestionIndex: 0,
-      deductionFlow: null,
-      taxCalculation: null,
-      done: false
+      deductionAnswers: {}, // Clear deduction answers
+      currentQuestionIndex: 0, // Reset question index
+      deductionFlow: null, // Clear deduction flow
+      taxCalculation: null, // Clear tax calculation
+      done: false // Reset done state
     };
     
     // Reset LangChain memory
     this.memory.clear();
     this.agentExecutor = null;
+    
+    console.log('State reset for new year. Filed summaries preserved:', preservedFiledSummaries.length);
   }
 }
 
