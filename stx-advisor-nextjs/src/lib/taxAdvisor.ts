@@ -1209,6 +1209,8 @@ If this is correct, I'll help you with your tax filing process. If not, please u
       // If we have extracted data but no deduction flow, we're in the year confirmation phase
       if (this.state.extractedData && !this.state.deductionFlow && this.state.currentQuestionIndex === 0) {
         console.log('In year confirmation phase');
+        console.log('Last user message:', lastUserMessage);
+        console.log('Extracted data:', this.state.extractedData);
         
         if (lastUserMessage && /^(yes|y|yeah|correct|right)$/i.test(lastUserMessage)) {
           console.log('Year confirmed - checking threshold');
@@ -1224,7 +1226,10 @@ If this is correct, I'll help you with your tax filing process. If not, please u
             
             // Check threshold
             console.log('Checking threshold for year:', year, 'income:', this.state.extractedData.gross_income);
-            if (this.isBelowThreshold()) {
+            const isBelow = this.isBelowThreshold();
+            console.log('Is below threshold:', isBelow);
+            
+            if (isBelow) {
               console.log('Below threshold, showing early exit');
               const summary = this.earlyExitSummary();
               const finalMsg = `${summary}\n\nWould you like to file a tax return for another year?`;
@@ -1245,6 +1250,7 @@ Please select your status for the year:
             this.addAgentMessage(nextQuestion);
             // Set a flag to indicate we're now in status selection
             this.state.currentQuestionIndex = 1;
+            console.log('Set currentQuestionIndex to 1, deductionFlow:', this.state.deductionFlow);
             return nextQuestion;
           }
         }
@@ -1265,6 +1271,10 @@ Please select your status for the year:
       // If we have extracted data and currentQuestionIndex > 0, we're in status selection
       if (this.state.extractedData && !this.state.deductionFlow && this.state.currentQuestionIndex > 0) {
         console.log('In status selection phase');
+        console.log('Last user message:', lastUserMessage);
+        console.log('Current question index:', this.state.currentQuestionIndex);
+        console.log('Deduction flow:', this.state.deductionFlow);
+        
         let status: UserStatus | null = null;
         
         // Handle numeric input (1, 2, 3, 4)
@@ -1276,16 +1286,19 @@ Please select your status for the year:
             '4': 'full_time'
           };
           status = statusMap[lastUserMessage];
+          console.log('Numeric status selected:', status);
         }
         // Handle text input
         else if (lastUserMessage && ['bachelor', 'master', 'new_employee', 'full_time'].includes(lastUserMessage)) {
           status = lastUserMessage as UserStatus;
+          console.log('Text status selected:', status);
         }
         
         if (status) {
           console.log('Status selected:', status);
           this.state.deductionFlow = this.deductionFlowMap[status];
           this.state.currentQuestionIndex = 0;
+          console.log('Set deduction flow and reset question index');
           
           const firstQuestion = this.state.deductionFlow.questions[0];
           const questionMsg = `Perfect! I've set your status as: **${status.replace('_', ' ').toUpperCase()}**
@@ -1299,6 +1312,7 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
           this.addAgentMessage(questionMsg);
           return questionMsg;
         } else {
+          console.log('No valid status selected, asking for clarification');
           const result = "Please choose a valid status by typing the number (1-4) or the status name: bachelor, master, new_employee, or full_time.";
           return result;
         }
