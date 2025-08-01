@@ -14,13 +14,7 @@ export async function POST(request: NextRequest) {
 
     console.log(`Processing ${files.length} files`)
 
-    // Limit to 3 files maximum to prevent timeouts
-    if (files.length > 3) {
-      return NextResponse.json({ 
-        error: 'Too many files. Please upload a maximum of 3 files at once.' 
-      }, { status: 400 })
-    }
-
+    // No file count limit - only size limits
     // Process files sequentially to avoid overwhelming the backend
     const results = []
     const failedResults = []

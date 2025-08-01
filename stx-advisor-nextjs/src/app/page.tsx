@@ -97,27 +97,21 @@ function AdvisorChat() {
   const handleFileUpload = async (files: FileList) => {
     if (!files || files.length === 0) return
 
-    // Validate files before processing
-    const maxFiles = 3
-    const maxFileSize = 10 * 1024 * 1024 // 10MB
-    const maxTotalSize = 50 * 1024 * 1024 // 50MB
-
-    if (files.length > maxFiles) {
-      alert(`Please select no more than ${maxFiles} files to prevent timeouts`)
-      return
-    }
+    // Validate files before processing - only size limits, no count limits
+    const maxFileSize = 10 * 1024 * 1024 // 10MB per file
+    const maxTotalSize = 100 * 1024 * 1024 // 100MB total (increased from 50MB)
 
     let totalSize = 0
     for (let i = 0; i < files.length; i++) {
       if (files[i].size > maxFileSize) {
-        alert(`File ${files[i].name} is too large. Maximum size is 10MB`)
+        alert(`File ${files[i].name} is too large. Maximum size is 10MB per file`)
         return
       }
       totalSize += files[i].size
     }
 
     if (totalSize > maxTotalSize) {
-      alert('Total file size exceeds 50MB limit')
+      alert('Total file size exceeds 100MB limit. Please upload fewer files or smaller files.')
       return
     }
 
@@ -148,7 +142,7 @@ function AdvisorChat() {
         } catch (error) {
           retryCount++
           if (retryCount > maxRetries) {
-            throw new Error(`Request failed after ${maxRetries + 1} attempts. Please try with fewer files (max 3) or smaller files.`)
+            throw new Error(`Request failed after ${maxRetries + 1} attempts. Please try again with smaller files.`)
           }
           setProcessingStatus(`Retrying... (attempt ${retryCount + 1}/${maxRetries + 1})`)
           await new Promise(resolve => setTimeout(resolve, 1000 * retryCount))
