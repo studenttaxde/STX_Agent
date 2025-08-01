@@ -99,10 +99,37 @@ def parse_german_tax_document(text: str) -> dict:
             year_str = f"20{year_match.group(2)}"  # Use the second group (21) and prepend 20
             result["year"] = int(year_str)
         
-        # Extract employer - look for the pattern more precisely
-        employer_match = re.search(r'Arbeitgeber\s+Name des Arbeitgebers\s+([A-Za-z\s]+?)(?=\s+Betroffenes Jahr|$)', text)
-        if employer_match:
-            result["employer"] = employer_match.group(1).strip()
+        # Extract employer - look for multiple patterns
+        employer_patterns = [
+            r'Arbeitgeber\s+Name des Arbeitgebers\s+([A-Za-z\s]+?)(?=\s+Betroffenes Jahr|$)',
+            r'Arbeitgeber\s+([A-Za-z\s]+?)(?=\s+Betroffenes Jahr|$)',
+            r'Name des Arbeitgebers\s+([A-Za-z\s]+?)(?=\s+Betroffenes Jahr|$)',
+            r'Arbeitgeber\s+([A-Za-z\s]+?)(?=\s+Steuerklasse|$)',
+            r'Arbeitgeber\s+([A-Za-z\s]+?)(?=\s+Identifikationsnummer|$)',
+            r'Arbeitgeber\s+([A-Za-z\s]+?)(?=\s+Bruttoarbeitslohn|$)',
+            r'Arbeitgeber\s+([A-Za-z\s]+?)(?=\s+einbehaltene|$)',
+            r'Arbeitgeber\s+([A-Za-z\s]+?)(?=\s+\d{4}|$)',
+            r'Arbeitgeber\s+([A-Za-z\s]+?)(?=\s+[A-Z]|$)',
+            r'Arbeitgeber\s+([A-Za-z\s]+?)(?=\s*$)',  # End of line
+        ]
+        
+        for pattern in employer_patterns:
+            employer_match = re.search(pattern, text, re.IGNORECASE)
+            if employer_match:
+                employer_name = employer_match.group(1).strip()
+                # Clean up the employer name
+                employer_name = re.sub(r'\s+', ' ', employer_name)  # Remove extra spaces
+                employer_name = employer_name.strip()
+                if employer_name and len(employer_name) > 2:  # Make sure it's not just whitespace
+                    result["employer"] = employer_name
+                    break
+        
+        # If still no employer found, try to extract from filename
+        if result["employer"] == "Unknown":
+            # Extract employer from filename (common pattern: "EmployerName_2021.pdf")
+            filename_employer = re.search(r'([A-Za-z\s]+?)_\d{4}', filename)
+            if filename_employer:
+                result["employer"] = filename_employer.group(1).replace('_', ' ').strip()
         
         # Extract name (Identifikationsnummer) - get the full number
         name_match = re.search(r'Identifikationsnummer\s+(\d+\s+\d+\s+\d+)', text)
@@ -184,11 +211,16 @@ Required fields:
 - bruttolohn: Gross income (Bruttoarbeitslohn) as a number
 - lohnsteuer: Income tax paid (einbehaltene Lohnsteuer) as a number  
 - solidaritaetszuschlag: Solidarity surcharge (einbehaltener Solidaritätszuschlag) as a number
-- employer: Employer name (Arbeitgeber Name des Arbeitgebers)
+- employer: Employer name (Arbeitgeber Name des Arbeitgebers) - extract the full company name
 - name: Employee name or identification number
 - year: Tax year (Veranlagungszeitraum)
 - steuerklasse: Tax class (Steuerklasse) as a number
 - beschaeftigungszeitraum: Employment period
+
+Important: For the employer field, look for patterns like:
+- "Arbeitgeber Name des Arbeitgebers [Company Name]"
+- "Arbeitgeber [Company Name]"
+- "Name des Arbeitgebers [Company Name]"
 
 Document: {filename}
 Text: {text}
