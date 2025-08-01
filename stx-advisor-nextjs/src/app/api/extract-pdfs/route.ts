@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { config } from '@/lib/config'
 
-export const maxDuration = 20 // 20 seconds for backend processing
+export const maxDuration = 10 // Netlify limit - 10 seconds maximum
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No files provided' }, { status: 400 })
     }
 
-    console.log(`Processing ${files.length} files with backend extraction`)
+    console.log(`Processing ${files.length} files with ultra-fast extraction`)
 
     const results = []
 
@@ -21,22 +21,19 @@ export async function POST(request: NextRequest) {
       console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`)
       
       try {
-        const result = await extractFromBackend(file)
+        const result = await extractWithUltraFastBackend(file)
         results.push(result)
-        console.log(`Backend extraction successful for ${file.name}`)
+        console.log(`Ultra-fast extraction successful for ${file.name}`)
       } catch (error) {
         console.error(`Error processing ${file.name}:`, error)
         results.push({
           filename: file.name,
           success: false,
-          error: error instanceof Error ? error.message : 'Backend extraction failed'
+          error: error instanceof Error ? error.message : 'Ultra-fast extraction failed'
         })
       }
 
-      // Small delay between files
-      if (i < files.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 200))
-      }
+      // No delay between files for maximum speed
     }
 
     console.log(`Completed processing ${results.length} files`)
@@ -55,12 +52,12 @@ export async function POST(request: NextRequest) {
   }
 }
 
-async function extractFromBackend(file: File) {
+async function extractWithUltraFastBackend(file: File) {
   const formDataToSend = new FormData()
   formDataToSend.append('file', file)
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
+  const timeoutId = setTimeout(() => controller.abort(), 6000) // 6 second timeout for ultra-fast processing
 
   try {
     const response = await fetch(`${config.backendUrl}/extract-text`, {
