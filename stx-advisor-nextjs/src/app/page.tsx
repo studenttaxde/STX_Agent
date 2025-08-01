@@ -257,23 +257,7 @@ function AdvisorChat() {
             fullName: 'User'
           }
         },
-        messages: [
-          {
-            sender: 'assistant',
-            text: `Great! I've analyzed your ${successfulResults.length} tax document${successfulResults.length > 1 ? 's' : ''}. Here's what I found:
-
-**Total Income:** €${formatCurrency(aggregatedData.totalIncome)}
-**Employer${aggregatedData.employers.length > 1 ? 's' : ''}:** ${getUniqueEmployers().join(', ')}
-**Year${years.length > 1 ? 's' : ''}:** ${years.join(', ')}
-
-I can help you with your German tax filing. Would you like me to:
-1. Guide you through potential deductions
-2. Calculate your tax liability
-3. Help you understand your tax situation
-
-What would you prefer to start with?`
-          }
-        ]
+        messages: [] // Start with empty messages, let advisor API handle the flow
       }))
 
       // Initialize the advisor after successful processing
@@ -291,7 +275,19 @@ What would you prefer to start with?`
         })
 
         if (advisorResponse.ok) {
+          const advisorData = await advisorResponse.json()
           console.log('Advisor initialized successfully')
+          
+          // Add the advisor's initial message
+          setState(prev => ({
+            ...prev,
+            messages: [
+              {
+                sender: 'assistant',
+                text: advisorData.message
+              }
+            ]
+          }))
         } else {
           console.error('Advisor initialization failed:', await advisorResponse.text())
         }
