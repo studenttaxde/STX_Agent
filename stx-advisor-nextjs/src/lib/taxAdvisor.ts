@@ -1114,157 +1114,214 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
   }
 
   async nextAdvisorMessage(): Promise<string> {
+    const lastUserMessage = this.state.messages.slice().reverse().find(msg => msg.sender === 'user')?.text.toLowerCase();
+    const lastAgentMessage = this.state.messages.slice().reverse().find(msg => msg.sender === 'assistant')?.text.toLowerCase();
+
     console.log('=== TaxAdvisor Debug ===');
+    console.log('Last user message:', lastUserMessage);
+    console.log('Last agent message:', lastAgentMessage);
     console.log('Messages count:', this.state.messages.length);
-    console.log('Extracted data:', this.state.extractedData);
+    console.log('Current question index:', this.state.currentQuestionIndex);
+    console.log('Deduction flow:', this.state.deductionFlow ? 'set' : 'null');
+    console.log('Done state:', this.state.done);
+    console.log('All messages:', this.state.messages.map(m => `${m.sender}: ${m.text.substring(0, 50)}...`));
 
     try {
-      // Initial message: Display summary and start conversation
+      // Initial message: Display summary and confirm year
       if (this.state.messages.length === 0) {
         console.log('Handling initial message');
         const summary = this.buildInitialSummary();
         this.addAgentMessage(summary);
+
+        const year = this.state.extractedData?.year;
+        if (year) {
+          const confirmMsg = `Can you please confirm that the tax year you want to file is ${year}? (yes/no)
+
+If this is correct, I'll help you with your tax filing process. If not, please upload the correct PDF for the year you want to file.`;
+          this.addAgentMessage(confirmMsg);
+          return `${summary}\n\n${confirmMsg}`;
+        }
+        
         return summary;
       }
+      
+      // If we have extracted data but no deduction flow, we're in the year confirmation phase
+      if (this.state.extractedData && !this.state.deductionFlow && this.state.currentQuestionIndex === 0) {
+        console.log('In year confirmation phase');
+        
+        if (lastUserMessage && /^(yes|y|yeah|correct|right)$/i.test(lastUserMessage)) {
+          console.log('Year confirmed - checking threshold');
+          const year = this.state.extractedData.year;
+          
+          if (year) {
+            // Add to filed summaries
+            this.state.filedSummaries.push({
+              year: year.toString(),
+              summary: { taxableIncome: 0, refund: 0 },
+              deductions: {}
+            });
+            
+            // Check threshold
+            console.log('Checking threshold for year:', year, 'income:', this.state.extractedData.gross_income);
+            if (this.isBelowThreshold()) {
+              console.log('Below threshold, showing early exit');
+              const summary = this.earlyExitSummary();
+              const finalMsg = `${summary}\n\nWould you like to file a tax return for another year?`;
+              this.addAgentMessage(finalMsg);
+              this.state.done = true;
+              return finalMsg;
+            }
+            
+            // If not below threshold, ask for status
+            console.log('Above threshold, asking for status');
+            const nextQuestion = `Since your income exceeds the tax-free threshold, let's check for deductible expenses to reduce your taxable income.
 
-      // Get the last user message
-      const lastUserMessage = this.state.messages.slice().reverse().find(msg => msg.sender === 'user')?.text.toLowerCase();
-      console.log('Last user message:', lastUserMessage);
-
-      // Simple conversation flow
-      if (lastUserMessage) {
-        // Check if user wants to start deductions
-        if (lastUserMessage.includes('deduction') || lastUserMessage.includes('1') || lastUserMessage.includes('guide')) {
-          const response = `Great! Let's go through potential deductions to maximize your tax savings. 
-
-First, I need to know your status for the tax year:
-1. **Bachelor's student**
-2. **Master's student**  
-3. **New employee** (started job after graduation)
-4. **Full-time employee**
-
-Please choose your status (1-4) or type the status name.`;
-          this.addAgentMessage(response);
-          return response;
+Please select your status for the year:
+1. **bachelor** (Bachelor's student)
+2. **master** (Master's student)  
+3. **new_employee** (Started job after graduation)
+4. **full_time** (Full-time employee)`;
+            this.addAgentMessage(nextQuestion);
+            return nextQuestion;
+          }
         }
-
-        // Check if user wants tax calculation
-        if (lastUserMessage.includes('tax liability') || lastUserMessage.includes('2') || lastUserMessage.includes('calculate')) {
-          const response = `I'll help you calculate your tax liability. Let me analyze your income and potential deductions.
-
-Based on your income of €${this.state.extractedData?.gross_income?.toLocaleString('de-DE') || 0}, here's a preliminary calculation:
-
-**Income Tax Calculation:**
-- Gross Income: €${this.state.extractedData?.gross_income?.toLocaleString('de-DE') || 0}
-- Basic Allowance: €${this.state.extractedData?.year === 2021 ? '9,744' : '10,908'}
-- Taxable Income: €${Math.max(0, (this.state.extractedData?.gross_income || 0) - (this.state.extractedData?.year === 2021 ? 9744 : 10908)).toLocaleString('de-DE')}
-
-Would you like me to guide you through potential deductions to reduce your taxable income?`;
-          this.addAgentMessage(response);
-          return response;
+        
+        if (lastUserMessage && /^(no|n|nope|not correct|wrong year)$/i.test(lastUserMessage)) {
+          console.log('Year not confirmed');
+          const result = "Please upload the correct PDF for the year you want to file.";
+          return result;
         }
-
-        // Check if user wants to understand their situation
-        if (lastUserMessage.includes('understand') || lastUserMessage.includes('3') || lastUserMessage.includes('situation')) {
-          const response = `Let me help you understand your tax situation:
-
-**Your Current Status:**
-- Tax Year: ${this.state.extractedData?.year || 'Unknown'}
-- Gross Income: €${this.state.extractedData?.gross_income?.toLocaleString('de-DE') || 0}
-- Employer: ${this.state.extractedData?.employer || 'Unknown'}
-
-**Key Points:**
-1. If your income is below the basic allowance (€${this.state.extractedData?.year === 2021 ? '9,744' : '10,908'}), you likely don't need to file
-2. If above, you may be eligible for refunds through deductions
-3. Common deductions include work-related expenses, education costs, and travel expenses
-
-Would you like me to guide you through potential deductions?`;
-          this.addAgentMessage(response);
-          return response;
-        }
-
-        // Handle status selection
-        if (lastUserMessage.match(/^[1-4]$/) || ['bachelor', 'master', 'new_employee', 'full_time'].includes(lastUserMessage)) {
-          let status = '';
-          if (lastUserMessage === '1' || lastUserMessage === 'bachelor') status = 'bachelor';
-          else if (lastUserMessage === '2' || lastUserMessage === 'master') status = 'master';
-          else if (lastUserMessage === '3' || lastUserMessage === 'new_employee') status = 'new_employee';
-          else if (lastUserMessage === '4' || lastUserMessage === 'full_time') status = 'full_time';
-
-          const response = `Perfect! I've set your status as: **${status.replace('_', ' ').toUpperCase()}**
-
-Now let's go through potential deductions. I'll ask you about common expenses that might be deductible:
-
-**Question 1: Work-related expenses**
-Did you have any work-related expenses like:
-- Travel to work (commuting costs)
-- Work equipment or tools
-- Professional development courses
-- Work-related books or materials
-
-Please provide the total amount in euros, or type "0" if none.`;
-          this.addAgentMessage(response);
-          return response;
-        }
-
-        // Handle deduction amounts
-        const amount = parseFloat(lastUserMessage);
-        if (!isNaN(amount)) {
-          const response = `Thank you! I've recorded €${amount.toLocaleString('de-DE')} for work-related expenses.
-
-**Question 2: Education expenses**
-Did you have any education-related expenses like:
-- Tuition fees
-- Course materials
-- Educational travel
-- Language courses
-
-Please provide the total amount in euros, or type "0" if none.`;
-          this.addAgentMessage(response);
-          return response;
-        }
-
-        // Handle "0" or "none" responses
-        if (lastUserMessage.includes('0') || lastUserMessage.includes('none') || lastUserMessage.includes('n/a')) {
-          const response = `Understood! No expenses for this category.
-
-**Question 2: Education expenses**
-Did you have any education-related expenses like:
-- Tuition fees
-- Course materials
-- Educational travel
-- Language courses
-
-Please provide the total amount in euros, or type "0" if none.`;
-          this.addAgentMessage(response);
-          return response;
-        }
-
-        // Fallback response
-        const response = `I understand you said: "${lastUserMessage}"
-
-Could you please provide a specific amount in euros, or let me know if you'd like to:
-1. Continue with deductions
-2. Calculate your tax liability
-3. Understand your tax situation
-
-What would you prefer?`;
-        this.addAgentMessage(response);
-        return response;
       }
+      
+      // If we have a deduction flow but no current question, we're in status selection
+      if (this.state.deductionFlow && this.state.currentQuestionIndex === 0) {
+        console.log('In status selection phase');
+        let status: UserStatus | null = null;
+        
+        // Handle numeric input (1, 2, 3, 4)
+        if (lastUserMessage && /^[1-4]$/.test(lastUserMessage)) {
+          const statusMap: Record<string, UserStatus> = {
+            '1': 'bachelor',
+            '2': 'master', 
+            '3': 'new_employee',
+            '4': 'full_time'
+          };
+          status = statusMap[lastUserMessage];
+        }
+        // Handle text input
+        else if (lastUserMessage && ['bachelor', 'master', 'new_employee', 'full_time'].includes(lastUserMessage)) {
+          status = lastUserMessage as UserStatus;
+        }
+        
+        if (status) {
+          console.log('Status selected:', status);
+          this.state.deductionFlow = this.deductionFlowMap[status];
+          this.state.currentQuestionIndex = 0;
+          
+          const firstQuestion = this.state.deductionFlow.questions[0];
+          const questionMsg = `Perfect! I've set your status as: **${status.replace('_', ' ').toUpperCase()}**
 
-      // Default response if no user message
-      const defaultResponse = `I'm here to help with your German tax filing! 
+Now I'll ask you specific deduction questions one by one to maximize your tax savings. Let's start with the first deduction question:
 
-Based on your uploaded documents, I can help you:
-1. Guide you through potential deductions
-2. Calculate your tax liability  
-3. Help you understand your tax situation
+**${firstQuestion.question}**
 
-What would you like to start with?`;
-      this.addAgentMessage(defaultResponse);
-      return defaultResponse;
+Please provide the amount or type "n/a" if this doesn't apply to you.`;
+          
+          this.addAgentMessage(questionMsg);
+          return questionMsg;
+        } else {
+          const result = "Please choose a valid status by typing the number (1-4) or the status name: bachelor, master, new_employee, or full_time.";
+          return result;
+        }
+      }
+      
+      // Handle deduction questions
+      const currentQuestion = this.getCurrentQuestion();
+      if (currentQuestion && this.state.deductionFlow && this.state.currentQuestionIndex < this.state.deductionFlow.questions.length) {
+        console.log('Handling deduction question:', currentQuestion.question);
+        
+        const deductionAnswer = this.processDeductionAnswer(lastUserMessage || '');
+        
+        if (deductionAnswer) {
+          console.log('Deduction answer processed:', deductionAnswer);
+          this.state.deductionAnswers[deductionAnswer.questionId] = deductionAnswer;
+          this.state.currentQuestionIndex++;
+          
+          const nextQuestion = this.getCurrentQuestion();
+          if (nextQuestion) {
+            const nextMsg = `Great! I've recorded €${deductionAnswer.amount} for ${deductionAnswer.details}.
 
+**${nextQuestion.question}**
+
+Please provide the amount or type "n/a" if this doesn't apply to you.`;
+            this.addAgentMessage(nextMsg);
+            return nextMsg;
+          } else {
+            // All questions answered, generate final summary
+            console.log('All questions answered, generating final summary');
+            const summary = this.generateFinalSummary();
+            const finalMsg = `${summary}\n\nWould you like to file a tax return for another year?`;
+            this.addAgentMessage(finalMsg);
+            this.state.done = true;
+            return finalMsg;
+          }
+        } else {
+          const result = "I couldn't understand your response. Please provide a specific amount (e.g., '500') or type 'n/a' if this doesn't apply to you.";
+          return result;
+        }
+      }
+      
+      // Handle "file for another year" response
+      if (lastAgentMessage && lastAgentMessage.includes('file a tax return for another year')) {
+        console.log('Handling file another year response');
+        if (lastUserMessage && /^(yes|y|yeah|sure|ok)$/i.test(lastUserMessage)) {
+          this.resetForNewYear();
+          const result = "Great! Please upload the PDF for the new year you want to file.";
+          return result;
+        } else {
+          const result = "Thank you for using our tax advisor! Your filing is complete.";
+          this.state.done = true;
+          return result;
+        }
+      }
+      
+      // Fallback: Use LangChain agent for complex queries
+      console.log('No specific handler found, using LangChain fallback');
+      try {
+        if (!this.agentExecutor) {
+          await this.initializeAgent();
+        }
+        
+        const context = {
+          extractedData: this.state.extractedData,
+          deductionAnswers: this.state.deductionAnswers,
+          currentQuestion: this.getCurrentQuestion(),
+          filedSummaries: this.state.filedSummaries,
+          lastUserMessage: lastUserMessage || '',
+          lastAgentMessage: lastAgentMessage || ''
+        };
+        
+        const response = await this.agentExecutor!.invoke({ 
+          input: lastUserMessage || '' 
+        });
+        
+        const reply = response.output || 'I apologize, but I need more information to help you properly. Could you please provide more details about your tax situation?';
+        
+        // Check if the reply indicates a summary or conclusion
+        if (reply.toLowerCase().includes('summary') || reply.toLowerCase().includes('conclusion') || reply.toLowerCase().includes('final')) {
+          this.state.done = true;
+        }
+        
+        this.addAgentMessage(reply);
+        return reply;
+        
+      } catch (error) {
+        console.error('Error in agent conversation:', error);
+        const fallbackMsg = "I'm having trouble processing your request. Could you please rephrase your question or provide more specific details about what you need help with?";
+        this.addAgentMessage(fallbackMsg);
+        return fallbackMsg;
+      }
+      
     } catch (error) {
       console.error('Error in nextAdvisorMessage:', error);
       const errorMsg = "I encountered an error. Please try uploading your PDF again or restart the conversation.";

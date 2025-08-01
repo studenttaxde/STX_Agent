@@ -30,10 +30,23 @@ const generateUserId = (): string => {
 
 // Advisor Chat Component
 function AdvisorChat() {
-  const [messages, setMessages] = useState<Array<{sender: 'user' | 'assistant', text: string}>>([])
-  const [loading, setLoading] = useState(false)
-  const [step, setStep] = useState<'upload' | 'advisor'>('upload')
-  const [extractedData, setExtractedData] = useState<any>(null)
+  const [state, setState] = useState<TaxAdvisorState>({
+    messages: [],
+    loading: false,
+    step: 'upload',
+    extractedData: null,
+    multiPDFData: null,
+    filedSummaries: [],
+    deductionAnswers: {},
+    currentQuestionIndex: 0,
+    deductionFlow: null,
+    taxCalculation: null,
+    done: false
+  })
+
+  const [existingData, setExistingData] = useState<any>(null)
+  const [suggestedDeductions, setSuggestedDeductions] = useState<any[]>([])
+  const [showExistingDataModal, setShowExistingDataModal] = useState(false)
   const [userId, setUserId] = useState<string>('')
   const [processingStatus, setProcessingStatus] = useState<string>('')
 
@@ -44,19 +57,48 @@ function AdvisorChat() {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight
     }
-  }, [messages])
+  }, [state.messages])
 
-  // Initialize user ID when component mounts
+  // Initialize user ID and load existing data when component mounts
   useEffect(() => {
     const id = generateUserId()
     setUserId(id)
+    loadExistingData(id)
   }, [])
+
+  const loadExistingData = async (id: string) => {
+    try {
+      const filings = await getTaxFilings(id)
+      if (filings.length > 0) {
+        setExistingData(filings)
+      }
+    } catch (error) {
+      console.error('Error loading existing data:', error)
+    }
+  }
+
+  const checkExistingDataForYear = async (year: number) => {
+    try {
+      const hasData = await hasExistingData(userId, year)
+      if (hasData) {
+        const existingFiling = await getTaxFilingByYear(userId, year)
+        if (existingFiling) {
+          setShowExistingDataModal(true)
+          return existingFiling
+        }
+      }
+      return null
+    } catch (error) {
+      console.error('Error checking existing data:', error)
+      return null
+    }
+  }
 
   const handleFileUpload = async (files: FileList) => {
     if (!files || files.length === 0) return
 
     // Validate files before processing
-    const maxFiles = 5
+    const maxFiles = 3
     const maxFileSize = 10 * 1024 * 1024 // 10MB
     const maxTotalSize = 50 * 1024 * 1024 // 50MB
 
@@ -79,7 +121,7 @@ function AdvisorChat() {
       return
     }
 
-    setLoading(true)
+    setState(prev => ({ ...prev, loading: true, step: 'upload' }))
     setProcessingStatus('Preparing files for upload...')
 
     try {
@@ -106,7 +148,7 @@ function AdvisorChat() {
         } catch (error) {
           retryCount++
           if (retryCount > maxRetries) {
-            throw new Error(`Request failed after ${maxRetries + 1} attempts. Please try with fewer files (max 5) or smaller files.`)
+            throw new Error(`Request failed after ${maxRetries + 1} attempts. Please try with fewer files (max 3) or smaller files.`)
           }
           setProcessingStatus(`Retrying... (attempt ${retryCount + 1}/${maxRetries + 1})`)
           await new Promise(resolve => setTimeout(resolve, 1000 * retryCount))
@@ -180,14 +222,67 @@ function AdvisorChat() {
 
       console.log('Final aggregated data:', aggregatedData)
 
-      // Update state with extracted data
-      setExtractedData({
-        ...aggregatedData,
-        gross_income: aggregatedData.totalIncome,
-        year: Math.max(...Array.from(aggregatedData.years).map((y: any) => parseInt(y)))
-      })
+      // Check for existing data for the year
+      const years = Array.from(aggregatedData.years)
+      if (years.length > 0) {
+        const year = Math.max(...years.map((y: any) => parseInt(y)))
+        const existingFiling = await checkExistingDataForYear(year)
+        if (existingFiling) {
+          // User chose to use existing data, so we don't proceed with new processing
+          return
+        }
+      }
 
-      // Initialize the advisor
+      // Load suggested deductions
+      try {
+        const year = Math.max(...years.map((y: any) => parseInt(y)))
+        const suggestions = await getSuggestedDeductions(userId, year)
+        setSuggestedDeductions(suggestions)
+      } catch (error) {
+        console.error('Error fetching suggested deductions:', error)
+      }
+
+      // Update state with extracted data
+      setState(prev => ({
+        ...prev,
+        loading: false,
+        step: 'advisor',
+        extractedData: {
+          ...aggregatedData,
+          gross_income: aggregatedData.totalIncome,
+          year: Math.max(...years.map((y: any) => parseInt(y)))
+        },
+        multiPDFData: {
+          totalFiles: successfulResults.length,
+          results: successfulResults,
+          summary: {
+            year: Math.max(...years.map((y: any) => parseInt(y))),
+            grossIncome: aggregatedData.totalIncome,
+            incomeTaxPaid: 0,
+            employer: aggregatedData.employers[0] || 'Unknown',
+            fullName: 'User'
+          }
+        },
+        messages: [
+          {
+            sender: 'assistant',
+            text: `Great! I've analyzed your ${successfulResults.length} tax document${successfulResults.length > 1 ? 's' : ''}. Here's what I found:
+
+**Total Income:** €${formatCurrency(aggregatedData.totalIncome)}
+**Employer${aggregatedData.employers.length > 1 ? 's' : ''}:** ${getUniqueEmployers().join(', ')}
+**Year${years.length > 1 ? 's' : ''}:** ${years.join(', ')}
+
+I can help you with your German tax filing. Would you like me to:
+1. Guide you through potential deductions
+2. Calculate your tax liability
+3. Help you understand your tax situation
+
+What would you prefer to start with?`
+          }
+        ]
+      }))
+
+      // Initialize the advisor after successful processing
       try {
         const advisorResponse = await fetch('/api/advisor', {
           method: 'POST',
@@ -202,48 +297,27 @@ function AdvisorChat() {
         })
 
         if (advisorResponse.ok) {
-          const advisorData = await advisorResponse.json()
           console.log('Advisor initialized successfully')
-          
-          // Set initial message
-          setMessages([
-            {
-              sender: 'assistant',
-              text: `Great! I've analyzed your ${successfulResults.length} tax document${successfulResults.length > 1 ? 's' : ''}. Here's what I found:
-
-**Total Income:** €${formatCurrency(aggregatedData.totalIncome)}
-**Employer${aggregatedData.employers.length > 1 ? 's' : ''}:** ${getUniqueEmployers(aggregatedData.employers).join(', ')}
-**Year${Array.from(aggregatedData.years).length > 1 ? 's' : ''}:** ${Array.from(aggregatedData.years).join(', ')}
-
-I can help you with your German tax filing. Would you like me to:
-1. Guide you through potential deductions
-2. Calculate your tax liability
-3. Help you understand your tax situation
-
-What would you prefer to start with?`
-            }
-          ])
-          
-          setStep('advisor')
         } else {
           console.error('Advisor initialization failed:', await advisorResponse.text())
-          throw new Error('Failed to initialize advisor')
         }
       } catch (error) {
         console.error('Error initializing advisor:', error)
-        throw error
       }
 
     } catch (error) {
       console.error('Upload error:', error)
-      setMessages([
-        {
-          sender: 'assistant',
-          text: `I encountered an issue processing your documents: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again with different files or contact support if the problem persists.`
-        }
-      ])
+      setState(prev => ({ 
+        ...prev, 
+        loading: false,
+        messages: [
+          {
+            sender: 'assistant',
+            text: `I encountered an issue processing your documents: ${error instanceof Error ? error.message : 'Unknown error'}. Please try again with different files or contact support if the problem persists.`
+          }
+        ]
+      }))
     } finally {
-      setLoading(false)
       setProcessingStatus('')
     }
   }
@@ -252,7 +326,10 @@ What would you prefer to start with?`
     if (!message.trim()) return
 
     // Add user message to chat
-    setMessages(prev => [...prev, { sender: 'user', text: message }])
+    setState(prev => ({
+      ...prev,
+      messages: [...prev.messages, { sender: 'user', text: message }]
+    }))
 
     try {
       const response = await fetch('/api/advisor', {
@@ -264,28 +341,36 @@ What would you prefer to start with?`
           action: 'respond',
           sessionId: userId,
           message: message,
-          extractedData: extractedData
+          extractedData: state.extractedData,
+          multiPDFData: state.multiPDFData
         })
       })
 
       if (response.ok) {
         const data = await response.json()
         
-        setMessages(prev => [...prev, { sender: 'assistant', text: data.message }])
+        setState(prev => ({
+          ...prev,
+          messages: [...prev.messages, { sender: 'assistant', text: data.message }],
+          done: data.done || false,
+          deductionFlow: data.deductionFlow || prev.deductionFlow,
+          currentQuestionIndex: data.currentQuestionIndex || prev.currentQuestionIndex,
+          taxCalculation: data.taxCalculation || prev.taxCalculation
+        }))
 
         // If the advisor is done, save the filing
         if (data.done && data.taxCalculation) {
           try {
-            const year = extractedData?.year || new Date().getFullYear()
+            const year = state.extractedData?.year || new Date().getFullYear()
             
             await saveTaxFiling({
               user_id: userId,
               year: year,
-              gross_income: extractedData?.gross_income || 0,
+              gross_income: state.extractedData?.gross_income || 0,
               income_tax_paid: 0,
-              employer: extractedData?.employer || 'Unknown',
+              employer: state.extractedData?.employer || 'Unknown',
               full_name: 'User',
-              deductions: data.deduction_answers || {}
+              deductions: state.deductionAnswers
             })
 
             console.log('Tax filing saved successfully')
@@ -298,18 +383,59 @@ What would you prefer to start with?`
       }
     } catch (error) {
       console.error('Error getting advisor response:', error)
-      setMessages(prev => [...prev, { 
-        sender: 'assistant', 
-        text: 'I apologize, but I encountered an error processing your request. Please try again or contact support if the problem persists.' 
-      }])
+      setState(prev => ({
+        ...prev,
+        messages: [...prev.messages, { 
+          sender: 'assistant', 
+          text: 'I apologize, but I encountered an error processing your request. Please try again or contact support if the problem persists.' 
+        }]
+      }))
     }
   }
 
   const handleFileAnotherYear = () => {
-    setMessages([])
-    setLoading(false)
-    setStep('upload')
-    setExtractedData(null)
+    setState(prev => ({
+      ...prev,
+      messages: [],
+      loading: false,
+      step: 'upload',
+      extractedData: null,
+      multiPDFData: null,
+      filedSummaries: [],
+      deductionAnswers: {},
+      currentQuestionIndex: 0,
+      deductionFlow: null,
+      taxCalculation: null,
+      done: false
+    }))
+  }
+
+  const handleUseExistingData = async (existingFiling: any) => {
+    setShowExistingDataModal(false)
+    
+    setState(prev => ({
+      ...prev,
+      step: 'advisor',
+      extractedData: {
+        gross_income: existingFiling.totalIncome,
+        employer: existingFiling.employer || 'Unknown',
+        year: existingFiling.year
+      },
+      messages: [
+        {
+          sender: 'assistant',
+          text: `Welcome back! I can see you have existing data for ${existingFiling.year}. Your total income was €${formatCurrency(existingFiling.totalIncome)}. Would you like me to help you with anything specific about your tax filing?`
+        }
+      ]
+    }))
+  }
+
+  const handleStartNew = () => {
+    setShowExistingDataModal(false)
+    setState(prev => ({
+      ...prev,
+      step: 'upload'
+    }))
   }
 
   const formatCurrency = (amount: number | string | undefined) => {
@@ -318,8 +444,9 @@ What would you prefer to start with?`
     return num.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   }
 
-  const getUniqueEmployers = (employers: string[]) => {
-    return [...new Set(employers)].filter(Boolean)
+  const getUniqueEmployers = () => {
+    if (!state.extractedData?.employer) return []
+    return [state.extractedData.employer]
   }
 
   return (
@@ -328,7 +455,7 @@ What would you prefer to start with?`
         <div className="p-6">
           <h2 className="text-2xl font-bold text-gray-900 mb-6">German Tax Advisor</h2>
           
-          {step === 'upload' && (
+          {state.step === 'upload' && (
             <div className="mb-6">
               <label htmlFor="file-upload" className="block text-sm font-medium text-gray-700 mb-2">
                 Upload your German tax documents (PDF)
@@ -341,7 +468,7 @@ What would you prefer to start with?`
                 onChange={(e) => e.target.files && handleFileUpload(e.target.files)}
                 className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
               />
-              {loading && (
+              {state.loading && (
                 <div className="mt-4">
                   <div className="flex items-center space-x-2">
                     <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
@@ -355,10 +482,10 @@ What would you prefer to start with?`
             </div>
           )}
 
-          {step === 'advisor' && (
+          {state.step === 'advisor' && (
             <div className="flex flex-col h-96">
               <div className="flex-1 overflow-y-auto space-y-4 mb-4" ref={chatContainerRef}>
-                {messages.map((message, index) => (
+                {state.messages.map((message, index) => (
                   <div
                     key={index}
                     className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
@@ -406,6 +533,36 @@ What would you prefer to start with?`
           )}
         </div>
       </div>
+
+      {/* Existing Data Modal */}
+      {showExistingDataModal && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
+          <div className="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+            <div className="mt-3 text-center">
+              <h3 className="text-lg font-medium text-gray-900 mb-4">
+                Existing Data Found
+              </h3>
+              <p className="text-sm text-gray-500 mb-6">
+                We found existing tax filing data for this year. Would you like to use the existing data or start fresh?
+              </p>
+              <div className="flex space-x-3">
+                <button
+                  onClick={() => handleUseExistingData(existingData)}
+                  className="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700"
+                >
+                  Use Existing
+                </button>
+                <button
+                  onClick={handleStartNew}
+                  className="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-md hover:bg-gray-400"
+                >
+                  Start Fresh
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
