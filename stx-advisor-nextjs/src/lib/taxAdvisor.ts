@@ -1191,6 +1191,12 @@ Please select your status for the year:
           const result = "Please upload the correct PDF for the year you want to file.";
           return result;
         }
+        
+        // If we're in year confirmation but user didn't give a clear yes/no, ask for clarification
+        if (lastUserMessage) {
+          const result = "Please confirm if the tax year is correct by answering 'yes' or 'no'.";
+          return result;
+        }
       }
       
       // If we have a deduction flow but no current question, we're in status selection
@@ -1285,41 +1291,22 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
         }
       }
       
-      // Fallback: Use LangChain agent for complex queries
-      console.log('No specific handler found, using LangChain fallback');
-      try {
-        if (!this.agentExecutor) {
-          await this.initializeAgent();
-        }
-        
-        const context = {
-          extractedData: this.state.extractedData,
-          deductionAnswers: this.state.deductionAnswers,
-          currentQuestion: this.getCurrentQuestion(),
-          filedSummaries: this.state.filedSummaries,
-          lastUserMessage: lastUserMessage || '',
-          lastAgentMessage: lastAgentMessage || ''
-        };
-        
-        const response = await this.agentExecutor!.invoke({ 
-          input: lastUserMessage || '' 
-        });
-        
-        const reply = response.output || 'I apologize, but I need more information to help you properly. Could you please provide more details about your tax situation?';
-        
-        // Check if the reply indicates a summary or conclusion
-        if (reply.toLowerCase().includes('summary') || reply.toLowerCase().includes('conclusion') || reply.toLowerCase().includes('final')) {
-          this.state.done = true;
-        }
-        
-        this.addAgentMessage(reply);
-        return reply;
-        
-      } catch (error) {
-        console.error('Error in agent conversation:', error);
-        const fallbackMsg = "I'm having trouble processing your request. Could you please rephrase your question or provide more specific details about what you need help with?";
-        this.addAgentMessage(fallbackMsg);
-        return fallbackMsg;
+      // Fallback: Provide helpful guidance instead of LangChain
+      console.log('No specific handler found, providing helpful guidance');
+      
+      // Check what phase we should be in and provide appropriate guidance
+      if (this.state.extractedData && !this.state.deductionFlow) {
+        const result = "I need you to confirm the tax year first. Please answer 'yes' if the year is correct, or 'no' if you need to upload different documents.";
+        return result;
+      } else if (this.state.deductionFlow && this.state.currentQuestionIndex === 0) {
+        const result = "Please choose your status by typing the number (1-4) or the status name: bachelor, master, new_employee, or full_time.";
+        return result;
+      } else if (this.state.deductionFlow && this.state.currentQuestionIndex > 0) {
+        const result = "Please provide a specific amount in euros, or type 'n/a' if this doesn't apply to you.";
+        return result;
+      } else {
+        const result = "I'm here to help with your German tax filing. Please follow the conversation flow and let me know if you need any clarification.";
+        return result;
       }
       
     } catch (error) {
