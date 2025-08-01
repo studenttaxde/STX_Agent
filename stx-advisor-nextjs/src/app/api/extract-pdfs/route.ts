@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { config } from '@/lib/config'
 import { parseLohnsteuerbescheinigung } from '@/lib/pdfParser'
 
-export const maxDuration = 10 // Netlify limit - 10 seconds maximum
+export const maxDuration = 8 // Reduced from 10 to 8 seconds for Netlify
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,7 +22,7 @@ export async function POST(request: NextRequest) {
       console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`)
       
       try {
-        // Layer 1: Try backend extraction (4 seconds)
+        // Layer 1: Try backend extraction (3 seconds)
         let result = await tryBackendExtraction(file)
         
         // Layer 2: If backend fails, try local parsing (3 seconds)
@@ -71,9 +71,11 @@ async function tryBackendExtraction(file: File) {
   formDataToSend.append('file', file)
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 4000) // 4 second timeout
+  const timeoutId = setTimeout(() => controller.abort(), 3000) // Reduced from 4 to 3 seconds
 
   try {
+    console.log(`Attempting backend extraction for ${file.name} to ${config.backendUrl}`)
+    
     const response = await fetch(`${config.backendUrl}/extract-text`, {
       method: 'POST',
       body: formDataToSend,
@@ -90,6 +92,8 @@ async function tryBackendExtraction(file: File) {
     }
 
     const result = await response.json()
+    console.log(`Backend extraction successful for ${file.name}`)
+    
     return {
       filename: file.name,
       success: true,
@@ -112,10 +116,14 @@ async function tryLocalPDFParsing(file: File) {
   const timeoutId = setTimeout(() => controller.abort(), 3000) // 3 second timeout
 
   try {
+    console.log(`Attempting local PDF parsing for ${file.name}`)
+    
     const arrayBuffer = await file.arrayBuffer()
     const extractedFields = await parseLohnsteuerbescheinigung(arrayBuffer)
     
     clearTimeout(timeoutId)
+    
+    console.log(`Local parsing successful for ${file.name}:`, extractedFields)
     
     // Convert to expected format
     const result = {
@@ -158,6 +166,8 @@ async function tryBasicTextExtraction(file: File) {
   const timeoutId = setTimeout(() => controller.abort(), 2000) // 2 second timeout
 
   try {
+    console.log(`Attempting basic text extraction for ${file.name}`)
+    
     // Basic text extraction using browser APIs
     const arrayBuffer = await file.arrayBuffer()
     const uint8Array = new Uint8Array(arrayBuffer)
@@ -167,6 +177,8 @@ async function tryBasicTextExtraction(file: File) {
     const extractedText = text.substring(0, 1000) // Take first 1000 characters
     
     clearTimeout(timeoutId)
+    
+    console.log(`Basic extraction successful for ${file.name}`)
     
     const result = {
       success: true,
