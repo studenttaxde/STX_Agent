@@ -1366,14 +1366,21 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
       }
       
       // Handle "file for another year" response
-      if (lastAgentMessage && lastAgentMessage.includes('file a tax return for another year')) {
+      if (lastAgentMessage && (lastAgentMessage.includes('file a tax return for another year') || lastAgentMessage.includes('another year'))) {
         console.log('Handling file another year response');
+        console.log('Last agent message:', lastAgentMessage);
+        console.log('Last user message:', lastUserMessage);
+        
         if (lastUserMessage && /^(yes|y|yeah|sure|ok)$/i.test(lastUserMessage)) {
+          console.log('User wants to file for another year, resetting state');
           this.resetForNewYear();
           const result = "Great! Please upload the PDF for the new year you want to file.";
+          this.addAgentMessage(result);
           return result;
         } else {
+          console.log('User does not want to file for another year, ending session');
           const result = "Thank you for using our tax advisor! Your filing is complete.";
+          this.addAgentMessage(result);
           this.state.done = true;
           return result;
         }
