@@ -182,6 +182,8 @@ function AdvisorChat() {
       // Process each result and aggregate data
       const aggregatedData: any = {
         totalIncome: 0,
+        lohnsteuer: 0,
+        solidaritaetszuschlag: 0,
         employers: [],
         years: new Set(),
         documents: []
@@ -195,6 +197,20 @@ function AdvisorChat() {
         if (income) {
           const parsedIncome = parseFloat(income) || 0
           aggregatedData.totalIncome += parsedIncome
+        }
+
+        // Aggregate Lohnsteuer (income tax paid)
+        const lohnsteuer = resultData.lohnsteuer || resultData.income_tax_paid || 0
+        if (lohnsteuer) {
+          const parsedLohnsteuer = parseFloat(lohnsteuer) || 0
+          aggregatedData.lohnsteuer += parsedLohnsteuer
+        }
+
+        // Aggregate Solidaritaetszuschlag
+        const solidaritaetszuschlag = resultData.solidaritaetszuschlag || 0
+        if (solidaritaetszuschlag) {
+          const parsedSolidaritaetszuschlag = parseFloat(solidaritaetszuschlag) || 0
+          aggregatedData.solidaritaetszuschlag += parsedSolidaritaetszuschlag
         }
 
         // Collect employers
@@ -268,13 +284,14 @@ function AdvisorChat() {
           employer: aggregatedData.employers.join(', ') || 'Unknown',
           total_hours: 0, // Not available from PDF extraction
           gross_income: aggregatedData.totalIncome,
-          income_tax_paid: 0, // Not available from PDF extraction
-          solidaritaetszuschlag: 0, // Not available from PDF extraction
+          income_tax_paid: aggregatedData.lohnsteuer || 0, // Extract from PDF data
+          solidaritaetszuschlag: aggregatedData.solidaritaetszuschlag || 0, // Extract from PDF data
           year: Math.max(...years.map((y: any) => parseInt(y))),
           // Additional fields that might be useful
           totalIncome: aggregatedData.totalIncome,
           employers: aggregatedData.employers,
-          documents: aggregatedData.documents
+          documents: aggregatedData.documents,
+          lohnsteuer: aggregatedData.lohnsteuer || 0
         }
 
         const advisorResponse = await fetch('/api/advisor', {

@@ -171,9 +171,17 @@ async function tryLocalExtraction(file: File) {
     const bruttoarbeitslohnMatch = text.match(/Bruttoarbeitslohn[:\s]*([\d.,]+)/i)
     const grossIncomeMatch = text.match(/Steuerpflichtiges Einkommen[:\s]*([\d.,]+)/i)
     
+    // Extract Lohnsteuer (income tax paid)
+    const lohnsteuerMatch = text.match(/Lohnsteuer[:\s]*([\d.,]+)/i)
+    const incomeTaxMatch = text.match(/Einkommensteuer[:\s]*([\d.,]+)/i)
+    const taxPaidMatch = text.match(/Steuer[:\s]*([\d.,]+)/i)
+    
     const bruttolohn = bruttolohnMatch ? parseFloat(bruttolohnMatch[1].replace(/[.,]/g, '')) : 0
     const bruttoarbeitslohn = bruttoarbeitslohnMatch ? parseFloat(bruttoarbeitslohnMatch[1].replace(/[.,]/g, '')) : 0
     const grossIncome = grossIncomeMatch ? parseFloat(grossIncomeMatch[1].replace(/[.,]/g, '')) : 0
+    const lohnsteuer = lohnsteuerMatch ? parseFloat(lohnsteuerMatch[1].replace(/[.,]/g, '')) : 
+                       incomeTaxMatch ? parseFloat(incomeTaxMatch[1].replace(/[.,]/g, '')) :
+                       taxPaidMatch ? parseFloat(taxPaidMatch[1].replace(/[.,]/g, '')) : 0
     
     // Extract year from filename or text
     const yearMatch = file.name.match(/(20\d{2})/) || text.match(/(20\d{2})/)
@@ -190,6 +198,8 @@ async function tryLocalExtraction(file: File) {
         bruttolohn: bruttolohn || bruttoarbeitslohn || grossIncome || 35000,
         bruttoarbeitslohn: bruttoarbeitslohn || bruttolohn || grossIncome || 35000,
         gross_income: grossIncome || bruttolohn || bruttoarbeitslohn || 35000,
+        lohnsteuer: lohnsteuer,
+        income_tax_paid: lohnsteuer, // Map to the expected field name
         employer: employer,
         year: year,
         werbungskosten: 0,
