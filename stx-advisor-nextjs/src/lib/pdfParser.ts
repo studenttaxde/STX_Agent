@@ -51,23 +51,28 @@ export async function parseLohnsteuerbescheinigung(
     };
     
     // Extract fields using regex patterns for German tax documents
-    const totalIncome = extractNumber(/Steuerpflichtiges Einkommen[:\s]*([\d.,]+)/i) ||
-                       extractNumber(/Bruttoarbeitslohn[:\s]*([\d.,]+)/i) ||
-                       extractNumber(/Gesamtbetrag[:\s]*([\d.,]+)/i);
+    // Based on actual Lohnsteuerbescheinigung format
+    const totalIncome = extractNumber(/Bruttoarbeitslohn[:\s]*([\d.,]+)/i) ||
+                       extractNumber(/Steuerpflichtiges Einkommen[:\s]*([\d.,]+)/i) ||
+                       extractNumber(/Gesamtbetrag[:\s]*([\d.,]+)/i) ||
+                       extractNumber(/Bruttolohn[:\s]*([\d.,]+)/i);
     
     const werbungskosten = extractNumber(/Werbungskosten[:\s]*([\d.,]+)/i) ||
                           extractNumber(/Arbeitsmittel[:\s]*([\d.,]+)/i) ||
-                          extractNumber(/Fahrtkosten[:\s]*([\d.,]+)/i);
+                          extractNumber(/Fahrtkosten[:\s]*([\d.,]+)/i) ||
+                          extractNumber(/Arbeitszimmer[:\s]*([\d.,]+)/i);
     
     const sozialversicherung = extractNumber(/Sozialversicherungsbeiträge[:\s]*([\d.,]+)/i) ||
                               extractNumber(/Krankenversicherung[:\s]*([\d.,]+)/i) ||
                               extractNumber(/Rentenversicherung[:\s]*([\d.,]+)/i) ||
                               extractNumber(/Arbeitslosenversicherung[:\s]*([\d.,]+)/i) ||
-                              extractNumber(/Pflegeversicherung[:\s]*([\d.,]+)/i);
+                              extractNumber(/Pflegeversicherung[:\s]*([\d.,]+)/i) ||
+                              extractNumber(/Sozialversicherung[:\s]*([\d.,]+)/i);
     
     const sonderausgaben = extractNumber(/Sonderausgaben[:\s]*([\d.,]+)/i) ||
                           extractNumber(/Lohnsteuer[:\s]*([\d.,]+)/i) ||
-                          extractNumber(/Solidaritätszuschlag[:\s]*([\d.,]+)/i);
+                          extractNumber(/Solidaritätszuschlag[:\s]*([\d.,]+)/i) ||
+                          extractNumber(/Steuern[:\s]*([\d.,]+)/i);
     
     // Additional patterns for common German tax document formats
     const additionalPatterns = {
@@ -104,7 +109,7 @@ export async function parseLohnsteuerbescheinigung(
       sonderausgaben: finalSonderausgaben
     };
     
-    console.log('Extracted fields:', result);
+    console.log('Parsed PDF fields:', result);
     
     return result;
     

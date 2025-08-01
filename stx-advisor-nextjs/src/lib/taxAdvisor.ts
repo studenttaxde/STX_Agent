@@ -87,9 +87,66 @@ function evaluateFormula(formula: string, extracted: Record<string, number>): nu
 
 export function loadRulesForYear(year: number): YearRules {
   try {
-    // In a real implementation, this would read from the file system
-    // For now, we'll return the 2024 rules as a fallback
-    if (year === 2024) {
+    // Try to load rules for the specific year
+    if (year === 2021) {
+      return {
+        basicAllowance: 9744,
+        "Werbungskosten": {
+          label: "Work-related expenses",
+          categories: ["all"],
+          cap: 1200,
+          formula: "werbungskosten",
+          qualifiers: [
+            { key: "amount_paid", source: "werbungskosten" }
+          ]
+        },
+        "Sozialversicherung": {
+          label: "Social insurance contributions",
+          categories: ["all"],
+          cap: 5000,
+          formula: "sozialversicherung",
+          qualifiers: [
+            { key: "amount_paid", source: "sozialversicherung" }
+          ]
+        },
+        "Sonderausgaben": {
+          label: "Special expenses (income tax + solidarity surcharge)",
+          categories: ["bachelor", "master", "graduate_same_year", "full_time"],
+          cap: 3000,
+          formula: "sonderausgaben",
+          qualifiers: [
+            { key: "amount_paid", source: "sonderausgaben" }
+          ]
+        },
+        "Education": {
+          label: "Education expenses",
+          categories: ["bachelor", "master"],
+          cap: 6000,
+          formula: "totalIncome * 0.1",
+          qualifiers: [
+            { key: "amount_paid", source: "education" }
+          ]
+        },
+        "Travel": {
+          label: "Travel expenses",
+          categories: ["bachelor", "master", "full_time"],
+          cap: 4500,
+          formula: "totalIncome * 0.08",
+          qualifiers: [
+            { key: "amount_paid", source: "travel" }
+          ]
+        },
+        "WorkEquipment": {
+          label: "Work equipment and tools",
+          categories: ["all"],
+          cap: 1000,
+          formula: "totalIncome * 0.02",
+          qualifiers: [
+            { key: "amount_paid", source: "work_equipment" }
+          ]
+        }
+      }
+    } else if (year === 2024) {
       return {
         basicAllowance: 10908,
         "Werbungskosten": {
@@ -122,7 +179,7 @@ export function loadRulesForYear(year: number): YearRules {
       }
     }
     
-    // Default fallback
+    // Default fallback for other years
     return {
       basicAllowance: 10908,
       "Werbungskosten": {

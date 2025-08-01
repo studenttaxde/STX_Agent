@@ -304,12 +304,15 @@ What would you prefer to start with?`
           },
           body: JSON.stringify({
             action: 'initialize',
+            sessionId: userId,
             extractedData: aggregatedData
           })
         })
 
         if (advisorResponse.ok) {
           console.log('Advisor initialized successfully')
+        } else {
+          console.error('Advisor initialization failed:', await advisorResponse.text())
         }
       } catch (error) {
         console.error('Error initializing advisor:', error)
@@ -349,6 +352,7 @@ What would you prefer to start with?`
         },
         body: JSON.stringify({
           action: 'respond',
+          sessionId: userId,
           message: message,
           extractedData: state.extractedData,
           multiPDFData: state.multiPDFData

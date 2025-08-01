@@ -103,10 +103,17 @@ export async function POST(request: NextRequest) {
       }
     }
     
+    console.log('Processing deductions for:', { statusKey, taxYear, totalIncome: aggregatedData.totalIncome })
+    
     // Load rules for the specified year
     const rules = loadRulesForYear(taxYear)
+    console.log('Loaded rules for year:', taxYear, 'Basic allowance:', rules.basicAllowance)
+    
     const filtered = filterCategories(rules, statusKey, aggregatedData)
+    console.log('Filtered categories for status:', statusKey, 'Count:', filtered.length)
+    
     const deductionResults = computeDeductions(filtered, aggregatedData)
+    console.log('Computed deductions:', deductionResults.length, 'results')
     
     // Check if income is below basic allowance
     if (aggregatedData.totalIncome <= rules.basicAllowance) {
@@ -117,6 +124,7 @@ export async function POST(request: NextRequest) {
     
     // Convert DeductionResult to DeductionItem for compatibility
     const deductions = deductionResults.map(convertDeductionResult)
+    console.log('Final deductions for frontend:', deductions)
     
     // Return deductions array with extracted fields for validation
     return NextResponse.json({
