@@ -1019,9 +1019,35 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
     const grossIncome = this.state.extractedData.gross_income || 0;
     const taxableIncome = Math.max(0, grossIncome - totalDeductions);
     const taxPaid = this.state.extractedData.income_tax_paid || 0;
+    const year = this.state.extractedData.year;
+    const threshold = year ? TaxAdvisor.TAX_FREE_THRESHOLDS[year] : 0;
     
-    // Simple tax calculation (in reality this would be more complex)
-    const estimatedTax = taxableIncome * 0.15;
+    // REFUND FIRST LOGIC: If taxable income is below threshold, full refund
+    if (taxableIncome <= threshold) {
+      console.log(`Taxable income (${taxableIncome}) is below threshold (${threshold}), full refund applies`);
+      const deductions = Object.values(this.state.deductionAnswers)
+        .filter(a => a.answer)
+        .map(a => {
+          const question = this.state.deductionFlow?.questions.find(q => q.id === a.questionId);
+          return {
+            category: question?.category || 'Unknown',
+            amount: a.amount || 0,
+            description: a.details || question?.question || 'Unknown deduction'
+          };
+        });
+
+      return {
+        totalDeductions,
+        deductions,
+        taxableIncome,
+        refund: taxPaid, // Full refund when below threshold
+        isBelowThreshold: true,
+        threshold
+      };
+    }
+    
+    // If above threshold, calculate proper German tax
+    const estimatedTax = this.calculateGermanTax(taxableIncome, year);
     const refund = Math.max(0, taxPaid - estimatedTax);
 
     const deductions = Object.values(this.state.deductionAnswers)
@@ -1039,8 +1065,26 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
       totalDeductions,
       deductions,
       taxableIncome,
-      refund
+      refund,
+      isBelowThreshold: false,
+      threshold,
+      estimatedTax
     };
+  }
+
+  private calculateGermanTax(taxableIncome: number, year: number | undefined): number {
+    // German progressive tax calculation for 2021
+    // This is a simplified version - in reality it's more complex
+    if (year === 2021) {
+      if (taxableIncome <= 9744) return 0;
+      if (taxableIncome <= 14753) return (taxableIncome - 9744) * 0.14;
+      if (taxableIncome <= 57918) return 701.26 + (taxableIncome - 14753) * 0.42;
+      if (taxableIncome <= 274612) return 18149.26 + (taxableIncome - 57918) * 0.42;
+      return 113839.26 + (taxableIncome - 274612) * 0.45;
+    }
+    
+    // Default simplified calculation for other years
+    return Math.max(0, taxableIncome * 0.15);
   }
 
   private generateFinalSummary(): string {
@@ -1050,15 +1094,30 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
 
     const summary = this.calculateTaxSummary();
     const { year, gross_income, income_tax_paid, full_name, employer } = this.state.extractedData;
+    const threshold = year ? TaxAdvisor.TAX_FREE_THRESHOLDS[year] : 0;
 
     let result = `# 📊 **Tax Filing Summary for ${full_name || "User"}**\n\n`;
     result += `## 💰 **Financial Overview**\n`;
     result += `- **Tax Year:** ${year}\n`;
     result += `- **Gross Income:** €${Number(gross_income || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n`;
     result += `- **Tax Paid:** €${Number(income_tax_paid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n`;
+    result += `- **Tax-Free Threshold:** €${threshold.toLocaleString('de-DE')}\n`;
     result += `- **Total Deductions:** €${summary.totalDeductions.toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n`;
     result += `- **Taxable Income:** €${summary.taxableIncome.toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n`;
     result += `- **Estimated Refund:** €${summary.refund.toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n\n`;
+
+    // REFUND EXPLANATION LOGIC
+    if (summary.isBelowThreshold) {
+      result += `## ✅ **Full Refund Explanation**\n`;
+      result += `Since your taxable income (€${summary.taxableIncome.toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is below the tax-free threshold (€${threshold.toLocaleString('de-DE')}) for ${year}, you are entitled to a **full refund** of the €${Number(income_tax_paid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })} tax you paid.\n\n`;
+      result += `**Why this applies:** Your income after deductions is below the minimum threshold, so no tax should have been paid.\n\n`;
+    } else {
+      result += `## 📊 **Refund Calculation Explanation**\n`;
+      result += `Since your taxable income (€${summary.taxableIncome.toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is above the tax-free threshold (€${threshold.toLocaleString('de-DE')}), your refund is calculated as:\n`;
+      result += `**Tax Paid:** €${Number(income_tax_paid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n`;
+      result += `**Estimated Tax Due:** €${summary.estimatedTax?.toLocaleString('de-DE', { minimumFractionDigits: 2 }) || '0,00'}\n`;
+      result += `**Refund:** €${summary.refund.toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n\n`;
+    }
 
     // Detailed expense breakdown
     if (summary.deductions.length > 0) {
@@ -1090,10 +1149,12 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
       tax_year: year,
       gross_income: Number(gross_income || 0),
       tax_paid: Number(income_tax_paid || 0),
+      tax_free_threshold: threshold,
       detailed_deductions: detailedDeductions,
       total_deductions: summary.totalDeductions,
       taxable_income: summary.taxableIncome,
       estimated_refund: summary.refund,
+      is_below_threshold: summary.isBelowThreshold,
       employer: employer || "Not specified",
       filing_date: new Date().toISOString().split('T')[0]
     };
@@ -1254,6 +1315,17 @@ Please provide the amount or type "n/a" if this doesn't apply to you.`;
           console.log('Deduction answer processed:', deductionAnswer);
           this.state.deductionAnswers[deductionAnswer.questionId] = deductionAnswer;
           this.state.currentQuestionIndex++;
+          
+          // Check if current deductions bring income below threshold
+          const currentSummary = this.calculateTaxSummary();
+          if (currentSummary.isBelowThreshold) {
+            console.log('Deductions brought income below threshold, stopping questions');
+            const summary = this.generateFinalSummary();
+            const finalMsg = `${summary}\n\nWould you like to file a tax return for another year?`;
+            this.addAgentMessage(finalMsg);
+            this.state.done = true;
+            return finalMsg;
+          }
           
           const nextQuestion = this.getCurrentQuestion();
           if (nextQuestion) {

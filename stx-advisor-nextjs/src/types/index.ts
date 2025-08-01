@@ -70,6 +70,9 @@ export interface DeductionSummary {
   }>;
   taxableIncome: number;
   refund: number;
+  isBelowThreshold?: boolean;
+  threshold?: number;
+  estimatedTax?: number;
 }
 
 // Single PDF extraction result
