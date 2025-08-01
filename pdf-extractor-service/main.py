@@ -377,14 +377,17 @@ def extract_text_from_file(file_content: bytes, filename: str) -> dict:
         temp_file_path = temp_file.name
     
     try:
+        # Validate file content
+        if len(file_content) == 0:
+            raise Exception("Empty file provided")
+        
         # Add specific try-except for file opening
         try:
             doc = fitz.open(temp_file_path)
-        except Exception as open_error: # Catching a broad exception as PyMuPDF can be varied
-             # Clean up temporary file
+        except Exception as open_error:
+            # Clean up temporary file
             os.unlink(temp_file_path)
             logger.error(f"Could not open or parse {filename}: {open_error}")
-            # Return a structured error
             return {
                 "success": False,
                 "filename": filename,
@@ -398,10 +401,27 @@ def extract_text_from_file(file_content: bytes, filename: str) -> dict:
         extracted_text = ""
         page_count = len(doc)
         
+        if page_count == 0:
+            doc.close()
+            os.unlink(temp_file_path)
+            return {
+                "success": False,
+                "filename": filename,
+                "text": "",
+                "page_count": 0,
+                "character_count": 0,
+                "error": "PDF file contains no pages."
+            }
+        
         for page_num in range(page_count):
-            page = doc[page_num]
-            page_text = page.get_text()
-            extracted_text += page_text + "\n"
+            try:
+                page = doc[page_num]
+                page_text = page.get_text()
+                extracted_text += page_text + "\n"
+            except Exception as page_error:
+                logger.warning(f"Error extracting text from page {page_num} of {filename}: {page_error}")
+                # Continue with other pages
+                continue
         
         doc.close()
         
@@ -409,8 +429,14 @@ def extract_text_from_file(file_content: bytes, filename: str) -> dict:
         os.unlink(temp_file_path)
         
         if not extracted_text.strip():
-            # This can happen for image-only PDFs without OCR
-            raise Exception("No text could be extracted from the PDF. It might be an image-only document.")
+            return {
+                "success": False,
+                "filename": filename,
+                "text": "",
+                "page_count": page_count,
+                "character_count": 0,
+                "error": "No text could be extracted from the PDF. It might be an image-only document."
+            }
         
         # Clean and enhance text using LangChain
         cleaned_text = clean_text(extracted_text)
@@ -428,7 +454,7 @@ def extract_text_from_file(file_content: bytes, filename: str) -> dict:
         # Parse the German tax document to extract structured data
         parsed_data = parse_with_llm(enhanced_text, filename)
         
-        logger.info(f"Successfully extracted and enhanced text from {filename} ({page_count} pages)")
+        logger.info(f"Successfully extracted and enhanced text from {filename} ({page_count} pages, {len(enhanced_text)} characters)")
         
         return {
             "success": True,
@@ -491,23 +517,51 @@ async def extract_text(file: UploadFile = File(...)):
         if not file.filename or not file.filename.lower().endswith('.pdf'):
             raise HTTPException(status_code=400, detail="Only PDF files are supported")
         
-        # Read file content
+        # Validate file size (max 10MB)
         content = await file.read()
+        if len(content) > 10 * 1024 * 1024:  # 10MB limit
+            raise HTTPException(status_code=400, detail="File too large. Maximum size is 10MB")
         
-        # Extract text using helper function
-        result = extract_text_from_file(content, file.filename)
+        logger.info(f"Processing file: {file.filename} ({len(content)} bytes)")
+        
+        # Extract text using helper function with timeout
+        import asyncio
+        try:
+            # Run extraction with timeout
+            result = await asyncio.wait_for(
+                asyncio.to_thread(extract_text_from_file, content, file.filename),
+                timeout=30.0  # 30 second timeout
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Extraction timeout for {file.filename}")
+            return {
+                "success": False,
+                "filename": file.filename,
+                "text": "",
+                "page_count": 0,
+                "character_count": 0,
+                "error": "Extraction timed out. Please try with a smaller file."
+            }
         
         if not result["success"]:
-            # Don't raise HTTPException here, just return the result from the helper
+            logger.warning(f"Extraction failed for {file.filename}: {result.get('error', 'Unknown error')}")
             return result
         
+        logger.info(f"Successfully extracted text from {file.filename}")
         return result
             
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Unexpected error processing {file.filename}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        return {
+            "success": False,
+            "filename": file.filename,
+            "text": "",
+            "page_count": 0,
+            "character_count": 0,
+            "error": f"Processing error: {str(e)}"
+        }
 
 @app.post("/extract-multiple")
 async def extract_multiple(files: List[UploadFile] = File(...)):
