@@ -262,6 +262,21 @@ function AdvisorChat() {
 
       // Initialize the advisor after successful processing
       try {
+        // Map the data to match what the advisor expects
+        const advisorData = {
+          full_name: 'User',
+          employer: aggregatedData.employers.join(', ') || 'Unknown',
+          total_hours: 0, // Not available from PDF extraction
+          gross_income: aggregatedData.totalIncome,
+          income_tax_paid: 0, // Not available from PDF extraction
+          solidaritaetszuschlag: 0, // Not available from PDF extraction
+          year: Math.max(...years.map((y: any) => parseInt(y))),
+          // Additional fields that might be useful
+          totalIncome: aggregatedData.totalIncome,
+          employers: aggregatedData.employers,
+          documents: aggregatedData.documents
+        }
+
         const advisorResponse = await fetch('/api/advisor', {
           method: 'POST',
           headers: {
@@ -270,13 +285,14 @@ function AdvisorChat() {
           body: JSON.stringify({
             action: 'initialize',
             sessionId: userId,
-            extractedData: aggregatedData
+            extractedData: advisorData
           })
         })
 
         if (advisorResponse.ok) {
-          const advisorData = await advisorResponse.json()
+          const advisorResponseData = await advisorResponse.json()
           console.log('Advisor initialized successfully')
+          console.log('Advisor response data:', advisorResponseData)
           
           // Add the advisor's initial message
           setState(prev => ({
@@ -284,7 +300,7 @@ function AdvisorChat() {
             messages: [
               {
                 sender: 'assistant',
-                text: advisorData.message
+                text: advisorResponseData.message
               }
             ]
           }))
