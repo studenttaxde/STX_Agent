@@ -1,5 +1,5 @@
 import { ChatOpenAI } from '@langchain/openai';
-import { AgentExecutor, createReactAgent } from 'langchain/agents';
+import { AgentExecutor, createOpenAIFunctionsAgent } from 'langchain/agents';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
@@ -694,16 +694,6 @@ Your core responsibilities:
 - Current Step: ${this.state.step}
 - Conversation History: ${this.state.messages.length} messages
 
-**Available Tools:**
-- analyzeExtractedData: Analyze and understand tax data
-- calculateTaxSummary: Calculate tax with deductions and refunds
-- askDeductionQuestions: Get personalized deduction questions
-- applyLossCarryforward: Handle previous year losses
-- generateFinalSummary: Create comprehensive tax summary
-- resetForNewYear: Reset for filing another year
-- checkTaxThreshold: Check if income is below tax-free limit
-- processDeductionAnswer: Process user answers to deduction questions
-
 **Always:**
 - Use tools for calculations and data operations
 - Provide accurate German tax advice
@@ -720,7 +710,7 @@ Your core responsibilities:
       const tools = this.createTools();
       const prompt = this.createPrompt();
 
-      const agent = await createReactAgent({
+      const agent = await createOpenAIFunctionsAgent({
         llm: this.llm,
         tools: tools as any, // Type assertion to fix linter error
         prompt
