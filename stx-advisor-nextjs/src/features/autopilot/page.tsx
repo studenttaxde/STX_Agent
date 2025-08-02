@@ -205,7 +205,7 @@ export default function AutopilotFlow() {
       while (retryCount <= maxRetries) {
         try {
           setProcessingStatus(`Processing ${selectedFiles.length} documents... (attempt ${retryCount + 1}/${maxRetries + 1})`)
-          response = await fetch('/api/advisor/autodetect', {
+          response = await fetch('/api/agent/autodetect', {
             method: 'POST',
             body: formData
           })
@@ -297,7 +297,7 @@ export default function AutopilotFlow() {
 
       // Save to database (if Supabase is configured)
       try {
-        const response = await fetch('/api/save-tax-filing', {
+        const response = await fetch('/api/tax-filing/save-tax-filing', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -354,7 +354,7 @@ export default function AutopilotFlow() {
         }
       }
 
-      const response = await fetch('/api/export-pdf', {
+      const response = await fetch('/api/tax-filing/export-pdf', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

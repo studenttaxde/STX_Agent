@@ -167,7 +167,7 @@ function AdvisorChat() {
       while (retryCount <= maxRetries) {
         try {
           setProcessingStatus(`Processing ${files.length} documents... (attempt ${retryCount + 1}/${maxRetries + 1})`)
-          response = await fetch('/api/extract-multiple-pdfs', {
+          response = await fetch('/api/tax-filing/extract-multiple-pdfs', {
             method: 'POST',
             body: formData
           })
@@ -389,7 +389,7 @@ function AdvisorChat() {
 
         console.log('Sending advisor data:', advisorData)
 
-        const advisorResponse = await fetch('/api/advisor', {
+        const advisorResponse = await fetch('/api/agent', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -450,7 +450,7 @@ function AdvisorChat() {
     }))
 
     try {
-      const response = await fetch('/api/advisor', {
+      const response = await fetch('/api/agent', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
