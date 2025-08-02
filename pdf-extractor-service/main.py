@@ -20,16 +20,6 @@ from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 import json
 
-from fastapi.middleware.cors import CORSMiddleware
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # Or restrict to Netlify domain
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # LangSmith tracing setup
 from langchain.callbacks import LangChainTracer
 
@@ -69,13 +59,15 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="PDF Extractor Service", version="3.0.0")
 
-# Enable CORS for all origins (configure as needed for production)
+# Enable CORS for cross-origin requests from Netlify frontend
+# TODO: In production, restrict allow_origins to specific domains like:
+# allow_origins=["https://stxadvisor1.netlify.app", "https://yourdomain.com"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Allow all origins for development
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],  # Allow all HTTP methods
+    allow_headers=["*"],  # Allow all headers
 )
 
 # Initialize LangChain components
