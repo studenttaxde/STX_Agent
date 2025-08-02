@@ -66,6 +66,9 @@ export interface PflegedAgentState {
   
   // User profile for personalized advice
   userProfile?: UserProfile | null;
+  
+  // Explanation caching
+  lastExplanation?: string;
 }
 
 export class PflegedAgent {
@@ -580,6 +583,38 @@ export class PflegedAgent {
       }),
 
       new DynamicStructuredTool({
+        name: 'explainRefundCalculation',
+        description: 'Generate a detailed explanation of how the tax refund was calculated',
+        schema: z.object({
+          includePersonalization: z.boolean().optional().describe('Include personalized notes based on user profile')
+        }),
+        func: async (input) => {
+          try {
+            const explanation = this.generateRefundExplanation();
+            
+            // Log tool usage
+            this.state.debugLog.push({
+              tool: 'explainRefundCalculation',
+              timestamp: new Date(),
+              input: input,
+              output: { explanationLength: explanation.length }
+            });
+            
+            return JSON.stringify({
+              success: true,
+              explanation: explanation,
+              message: 'Refund calculation explanation generated'
+            });
+          } catch (error) {
+            return JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : 'Unknown error'
+            });
+          }
+        }
+      }),
+
+      new DynamicStructuredTool({
         name: 'applyLossCarryforward',
         description: 'Get and apply loss carryforward from previous years',
         schema: z.object({
@@ -862,10 +897,17 @@ Your role is to:
 3. Guide users through deduction questions relevant to their circumstances
 4. Calculate potential refunds and tax savings
 5. Generate comprehensive, professional summaries
+6. **Explain your reasoning transparently** - When users ask "how did you get that number?" or "can you explain?", provide detailed breakdowns of calculations
 
 Available data: ${this.state.extractedData ? 'Available' : 'Not available'}
 
 Always provide helpful, accurate German tax advice. Be conversational but professional. Use the available tools to analyze data and provide insights.
+
+**Transparency Commitment:**
+- Always explain your calculations when asked
+- Break down complex tax concepts into simple steps
+- Show your work and reasoning clearly
+- Be honest about limitations and assumptions
 
 When asking questions, consider the user's profile:
 - For students: Focus on education expenses, books, travel
@@ -906,6 +948,23 @@ When asking questions, consider the user's profile:
     try {
       console.log('Agent runAgent called with input:', input);
       console.log('Current state:', this.state);
+      
+      // Check if user is asking for explanation
+      const explanationKeywords = [
+        'explain', 'how did you get', 'why is my refund', 'calculation', 
+        'breakdown', 'show me how', 'can you explain', 'what does this mean',
+        'step by step', 'detailed explanation'
+      ];
+      
+      const isAskingForExplanation = explanationKeywords.some(keyword => 
+        input.toLowerCase().includes(keyword)
+      );
+      
+      // If asking for explanation and we have data, provide explanation
+      if (isAskingForExplanation && this.state.extractedData) {
+        console.log('User requested explanation, generating detailed breakdown...');
+        return this.generateRefundExplanation();
+      }
       
       // If this is the first interaction and we have extracted data, do initial analysis
       if (!this.state.hasInteracted && this.state.extractedData) {
@@ -1393,6 +1452,85 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
       console.error('Error updating user profile:', error);
       return false;
     }
+  }
+
+  generateRefundExplanation(): string {
+    if (!this.state.extractedData) {
+      return "I don't have your tax data to explain the calculation. Please upload your tax documents first.";
+    }
+
+    const { gross_income, income_tax_paid, year } = this.state.extractedData;
+    const totalDeductions = Object.values(this.state.deductionAnswers)
+      .filter(a => a.answer)
+      .reduce((sum, a) => sum + (a.amount || 0), 0);
+    
+    const taxableIncome = Math.max(0, (gross_income || 0) - totalDeductions);
+    const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 10908;
+    
+    // Calculate refund using the same logic as generateFinalSummary
+    let refund = 0;
+    let explanation = '';
+    
+    if (taxableIncome <= threshold) {
+      refund = income_tax_paid || 0; // Full refund when below threshold
+      explanation = `Since your taxable income (€${taxableIncome.toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is below the tax-free threshold (€${threshold.toLocaleString('de-DE')}) for ${year}, you are eligible for a **full refund** of all taxes paid.`;
+    } else {
+      const estimatedTax = this.calculateGermanTax(taxableIncome, year);
+      refund = Math.max(0, (income_tax_paid || 0) - estimatedTax);
+      explanation = `Since your taxable income (€${taxableIncome.toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is above the tax-free threshold (€${threshold.toLocaleString('de-DE')}) for ${year}, we calculate your refund as the difference between taxes paid and estimated tax liability.`;
+    }
+
+    // Build deductions breakdown
+    const deductionsBreakdown = Object.values(this.state.deductionAnswers)
+      .filter(a => a.answer && (a.amount || 0) > 0)
+      .map(a => `- ${a.details}`);
+
+    // Personalize explanation based on user profile
+    let personalizedNote = '';
+    if (this.state.userProfile) {
+      const profile = this.state.userProfile;
+      if (profile.job_type === 'freelancer') {
+        personalizedNote = '\n\n💼 **Freelancer Note:** As a freelancer, you may be eligible for additional business-related deductions not included in this calculation.';
+      } else if (profile.marital_status === 'married') {
+        personalizedNote = '\n\n💑 **Married Filing Note:** Joint filing with your spouse may provide additional tax benefits not reflected in this individual calculation.';
+      }
+    }
+
+    const explanationText = `# 📊 **Tax Refund Calculation Explanation**
+
+## 1️⃣ **Income Analysis**
+- **Gross Income:** €${Number(gross_income || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+- **Tax Year:** ${year || 'Not specified'}
+
+## 2️⃣ **Deductions Applied**
+${deductionsBreakdown.length > 0 ? deductionsBreakdown.join('\n') : '- No deductions claimed'}
+
+## 3️⃣ **Taxable Income Calculation**
+- **Gross Income:** €${Number(gross_income || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+- **Total Deductions:** €${totalDeductions.toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+- **Taxable Income:** €${taxableIncome.toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+
+## 4️⃣ **Tax-Free Threshold Check**
+- **Threshold for ${year}:** €${threshold.toLocaleString('de-DE')}
+- **Your Taxable Income:** €${taxableIncome.toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+- **Status:** ${taxableIncome <= threshold ? 'Below threshold' : 'Above threshold'}
+
+## 5️⃣ **Tax Calculation**
+- **Taxes Paid:** €${Number(income_tax_paid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+${taxableIncome > threshold ? `- **Estimated Tax Liability:** €${this.calculateGermanTax(taxableIncome, year).toLocaleString('de-DE', { minimumFractionDigits: 2 })}` : ''}
+
+## 6️⃣ **Refund Calculation**
+${explanation}
+
+**Final Refund:** €${refund.toLocaleString('de-DE', { minimumFractionDigits: 2 })}${personalizedNote}
+
+---
+*This explanation is based on the information provided. For official calculations, please consult with a tax professional.*`;
+
+    // Cache the explanation
+    this.state.lastExplanation = explanationText;
+    
+    return explanationText;
   }
 
   addDeductionAnswer(questionId: string, answer: DeductionAnswer) {
