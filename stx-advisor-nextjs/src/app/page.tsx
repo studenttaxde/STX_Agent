@@ -225,22 +225,23 @@ function AdvisorChat() {
       }
 
       successfulResults.forEach((result: any) => {
-        // Check if result is successful
-        if (!result.success) {
-          console.warn(`Skipping failed result for ${result.filename}:`, result.error || 'No extracted data')
+        // Check if result is successful (backend uses 'status' field)
+        if (result.status !== 'success') {
+          console.warn(`Skipping failed result for ${result.fileName}:`, result.error || 'No extracted data')
           return
         }
 
         // Handle both successful AI processing and fallback cases
-        const resultData = result.extractedData || {}
-        console.log(`Processing result for ${result.filename}:`, resultData)
+        // Backend returns extracted data in 'metadata' field
+        const resultData = result.metadata || {}
+        console.log(`Processing result for ${result.fileName}:`, resultData)
 
         // Aggregate income - check multiple possible field names
         const income = resultData.bruttolohn || resultData.bruttoarbeitslohn || resultData.gross_income || 0
         if (income && income !== 0) {
           const parsedIncome = parseFloat(income) || 0
           aggregatedData.totalIncome += parsedIncome
-          console.log(`Added income: ${parsedIncome} for ${result.filename}`)
+          console.log(`Added income: ${parsedIncome} for ${result.fileName}`)
         }
 
         // Aggregate Lohnsteuer (income tax paid)
@@ -248,7 +249,7 @@ function AdvisorChat() {
         if (lohnsteuer && lohnsteuer !== 0) {
           const parsedLohnsteuer = parseFloat(lohnsteuer) || 0
           aggregatedData.lohnsteuer += parsedLohnsteuer
-          console.log(`Added lohnsteuer: ${parsedLohnsteuer} for ${result.filename}`)
+          console.log(`Added lohnsteuer: ${parsedLohnsteuer} for ${result.fileName}`)
         }
 
         // Aggregate Solidaritaetszuschlag
@@ -256,7 +257,7 @@ function AdvisorChat() {
         if (solidaritaetszuschlag && solidaritaetszuschlag !== 0) {
           const parsedSolidaritaetszuschlag = parseFloat(solidaritaetszuschlag) || 0
           aggregatedData.solidaritaetszuschlag += parsedSolidaritaetszuschlag
-          console.log(`Added solidaritaetszuschlag: ${parsedSolidaritaetszuschlag} for ${result.filename}`)
+          console.log(`Added solidaritaetszuschlag: ${parsedSolidaritaetszuschlag} for ${result.fileName}`)
         }
 
         // Collect employers
@@ -271,13 +272,13 @@ function AdvisorChat() {
 
         // Store document info
         aggregatedData.documents.push({
-          filename: result.filename,
+          filename: result.fileName,
           data: resultData
         })
 
         // If no AI data was extracted, try to extract basic info from text
         if (!resultData.bruttolohn && !resultData.lohnsteuer && result.text) {
-          console.log(`Attempting basic extraction from text for ${result.filename}`)
+          console.log(`Attempting basic extraction from text for ${result.fileName}`)
           
           // Try to extract basic information from the text using regex
           const text = result.text.toLowerCase()
