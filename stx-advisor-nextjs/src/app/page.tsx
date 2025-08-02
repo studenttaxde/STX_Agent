@@ -190,7 +190,13 @@ function AdvisorChat() {
       }
 
       successfulResults.forEach((result: any) => {
-        const resultData = result.data
+        // Check if result has extractedData (successful extraction) or is a failed result
+        if (!result.success || !result.extractedData) {
+          console.warn(`Skipping failed result for ${result.filename}:`, result.error || 'No extracted data')
+          return
+        }
+
+        const resultData = result.extractedData
 
         // Aggregate income - check multiple possible field names
         const income = resultData.bruttolohn || resultData.bruttoarbeitslohn || resultData.gross_income || 0
