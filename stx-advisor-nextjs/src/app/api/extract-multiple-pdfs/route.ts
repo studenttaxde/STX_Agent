@@ -5,6 +5,8 @@ import { config } from '@/lib/config';
 
 const PDF_EXTRACTOR_URL = process.env.PDF_EXTRACTOR_URL || config.backendUrl;
 
+export const maxDuration = 10 // Netlify limit - 10 seconds maximum
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -12,6 +14,13 @@ export async function POST(request: NextRequest) {
 
     if (!files || files.length === 0) {
       return NextResponse.json({ error: 'No files provided' }, { status: 400 });
+    }
+
+    // Limit number of files to prevent timeouts
+    if (files.length > 3) {
+      return NextResponse.json({ 
+        error: 'Too many files. Maximum 3 files allowed to prevent timeouts.' 
+      }, { status: 400 });
     }
 
     console.log(`Processing ${files.length} files with multiple PDF extraction`);
@@ -24,82 +33,94 @@ export async function POST(request: NextRequest) {
 
     console.log(`Calling PDF extraction service at: ${PDF_EXTRACTOR_URL}/extract`);
 
-    const extractorResponse = await fetch(`${PDF_EXTRACTOR_URL}/extract`, {
-      method: 'POST',
-      body: extractorFormData,
-    });
+    // Add timeout for PDF extraction service call
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000); // 6 seconds for PDF extraction
 
-    console.log(`PDF extraction service response status: ${extractorResponse.status}`);
+    try {
+      const extractorResponse = await fetch(`${PDF_EXTRACTOR_URL}/extract`, {
+        method: 'POST',
+        body: extractorFormData,
+        signal: controller.signal,
+      });
 
-    if (!extractorResponse.ok) {
-      const errorText = await extractorResponse.text();
-      console.error(`PDF extraction service error: ${extractorResponse.status} - ${errorText}`);
-      return NextResponse.json({ 
-        error: 'PDF extraction service failed', 
-        details: errorText 
-      }, { status: extractorResponse.status });
-    }
+      clearTimeout(timeoutId);
 
-    const extractorData = await extractorResponse.json();
-    console.log(`PDF extraction service returned:`, extractorData);
+      console.log(`PDF extraction service response status: ${extractorResponse.status}`);
 
-    // Validate response format
-    if (!extractorData.success) {
-      return NextResponse.json({ 
-        error: 'PDF extraction service failed', 
-        details: extractorData.error || 'Unknown error'
-      }, { status: 500 });
-    }
-
-    if (!extractorData.results || !Array.isArray(extractorData.results)) {
-      return NextResponse.json({ 
-        error: 'Invalid response format from PDF extraction service'
-      }, { status: 500 });
-    }
-
-    // Process each extracted text with OpenAI
-    const openaiApiKey = process.env.OPENAI_API_KEY;
-    if (!openaiApiKey) {
-      return NextResponse.json({ error: 'OpenAI API key not configured' }, { status: 500 });
-    }
-
-    const openai = new OpenAI({ apiKey: openaiApiKey });
-    const results: PDFExtractionResult[] = [];
-    
-    // Initialize summary totals
-    let totalBruttolohn = 0;
-    let totalLohnsteuer = 0;
-    let totalSolidaritaetszuschlag = 0;
-    let processedFiles = 0;
-    let failedFiles = 0;
-    const timePeriods: Array<{ filename: string; from: string; to: string }> = [];
-
-    for (const extractorResult of extractorData.results) {
-      if (extractorResult.status !== 'success') {
-        results.push({
-          success: false,
-          filename: extractorResult.fileName,
-          text: '',
-          page_count: 0,
-          character_count: 0,
-          error: extractorResult.error || 'Extraction failed'
-        });
-        failedFiles++;
-        continue;
+      if (!extractorResponse.ok) {
+        const errorText = await extractorResponse.text();
+        console.error(`PDF extraction service error: ${extractorResponse.status} - ${errorText}`);
+        return NextResponse.json({ 
+          error: 'PDF extraction service failed', 
+          details: errorText 
+        }, { status: extractorResponse.status });
       }
 
-      try {
-        // Process with OpenAI to extract German tax fields
-        const response = await openai.chat.completions.create({
-          model: "gpt-4o",
-          messages: [
-            {
-              role: "system",
-              content: "You are a German tax document assistant. Extract specific tax-relevant fields from German payroll documents (Lohnabrechnung/Gehaltsabrechnung)."
-            },
-            {
-              role: "user",
-              content: `Extract the following fields from this German tax document and return ONLY valid JSON (no explanation, no markdown, no comments, no code block, no triple backticks):
+      const extractorData = await extractorResponse.json();
+      console.log(`PDF extraction service returned:`, extractorData);
+
+      // Validate response format
+      if (!extractorData.success) {
+        return NextResponse.json({ 
+          error: 'PDF extraction service failed', 
+          details: extractorData.error || 'Unknown error'
+        }, { status: 500 });
+      }
+
+      if (!extractorData.results || !Array.isArray(extractorData.results)) {
+        return NextResponse.json({ 
+          error: 'Invalid response format from PDF extraction service'
+        }, { status: 500 });
+      }
+
+      // Process each extracted text with OpenAI (with reduced timeout)
+      const openaiApiKey = process.env.OPENAI_API_KEY;
+      if (!openaiApiKey) {
+        return NextResponse.json({ error: 'OpenAI API key not configured' }, { status: 500 });
+      }
+
+      const openai = new OpenAI({ apiKey: openaiApiKey });
+      const results: PDFExtractionResult[] = [];
+      
+      // Initialize summary totals
+      let totalBruttolohn = 0;
+      let totalLohnsteuer = 0;
+      let totalSolidaritaetszuschlag = 0;
+      let processedFiles = 0;
+      let failedFiles = 0;
+      const timePeriods: Array<{ filename: string; from: string; to: string }> = [];
+
+      for (const extractorResult of extractorData.results) {
+        if (extractorResult.status !== 'success') {
+          results.push({
+            success: false,
+            filename: extractorResult.fileName,
+            text: '',
+            page_count: 0,
+            character_count: 0,
+            error: extractorResult.error || 'Extraction failed'
+          });
+          failedFiles++;
+          continue;
+        }
+
+        try {
+          // Process with OpenAI to extract German tax fields (with timeout)
+          const openaiController = new AbortController();
+          const openaiTimeoutId = setTimeout(() => openaiController.abort(), 3000); // 3 seconds per file
+
+          try {
+            const response = await openai.chat.completions.create({
+              model: "gpt-4o",
+              messages: [
+                {
+                  role: "system",
+                  content: "You are a German tax document assistant. Extract specific tax-relevant fields from German payroll documents (Lohnabrechnung/Gehaltsabrechnung)."
+                },
+                {
+                  role: "user",
+                  content: `Extract the following fields from this German tax document and return ONLY valid JSON (no explanation, no markdown, no comments, no code block, no triple backticks):
 
 Fields to extract:
 - name: Full name of the employee
@@ -115,119 +136,146 @@ Document text:
 ${extractorResult.text}
 
 Respond ONLY with a valid JSON object containing these fields. Use null for missing values.`
-            }
-          ]
-        });
-
-        const content = response.choices[0].message?.content || '';
-        console.log(`[OpenAI raw response for ${extractorResult.fileName}]`, content);
-
-        // Clean up the response and parse JSON
-        const contentClean = content
-          .replace(/^```json\s*|^```|```$/gim, '')
-          .trim();
-
-        try {
-          const fields: GermanTaxFields = JSON.parse(contentClean);
-          console.log(`[OpenAI parsed fields for ${extractorResult.filename}]`, fields);
-
-          // Add to summary totals if values are valid numbers
-          if (typeof fields.bruttolohn === 'number' && !isNaN(fields.bruttolohn)) {
-            totalBruttolohn += fields.bruttolohn;
-          }
-          if (typeof fields.lohnsteuer === 'number' && !isNaN(fields.lohnsteuer)) {
-            totalLohnsteuer += fields.lohnsteuer;
-          }
-          if (typeof fields.solidaritaetszuschlag === 'number' && !isNaN(fields.solidaritaetszuschlag)) {
-            totalSolidaritaetszuschlag += fields.solidaritaetszuschlag;
-          }
-
-          // Add time period if available
-          if (fields.time_period_from && fields.time_period_to) {
-            timePeriods.push({
-              filename: extractorResult.filename,
-              from: fields.time_period_from,
-              to: fields.time_period_to
+                }
+              ],
+              max_tokens: 500, // Limit response size for faster processing
+              temperature: 0.1 // Lower temperature for more consistent results
             });
+
+            clearTimeout(openaiTimeoutId);
+
+            const content = response.choices[0].message?.content || '';
+            console.log(`[OpenAI raw response for ${extractorResult.fileName}]`, content);
+
+            // Clean up the response and parse JSON
+            const contentClean = content
+              .replace(/^```json\s*|^```|```$/gim, '')
+              .trim();
+
+            try {
+              const fields: GermanTaxFields = JSON.parse(contentClean);
+              console.log(`[OpenAI parsed fields for ${extractorResult.fileName}]`, fields);
+
+              // Add to summary totals if values are valid numbers
+              if (typeof fields.bruttolohn === 'number' && !isNaN(fields.bruttolohn)) {
+                totalBruttolohn += fields.bruttolohn;
+              }
+              if (typeof fields.lohnsteuer === 'number' && !isNaN(fields.lohnsteuer)) {
+                totalLohnsteuer += fields.lohnsteuer;
+              }
+              if (typeof fields.solidaritaetszuschlag === 'number' && !isNaN(fields.solidaritaetszuschlag)) {
+                totalSolidaritaetszuschlag += fields.solidaritaetszuschlag;
+              }
+
+              // Add time period if available
+              if (fields.time_period_from && fields.time_period_to) {
+                timePeriods.push({
+                  filename: extractorResult.fileName,
+                  from: fields.time_period_from,
+                  to: fields.time_period_to
+                });
+              }
+
+              results.push({
+                success: true,
+                filename: extractorResult.fileName,
+                text: extractorResult.text,
+                page_count: extractorResult.page_count,
+                character_count: extractorResult.character_count,
+                extractedData: fields
+              });
+
+              processedFiles++;
+
+            } catch (parseError) {
+              console.error(`JSON parse error for ${extractorResult.fileName}:`, parseError);
+              results.push({
+                success: false,
+                filename: extractorResult.fileName,
+                text: extractorResult.text,
+                page_count: extractorResult.page_count,
+                character_count: extractorResult.character_count,
+                error: 'Failed to parse OpenAI response'
+              });
+              failedFiles++;
+            }
+
+          } catch (openaiError) {
+            clearTimeout(openaiTimeoutId);
+            console.error(`OpenAI processing error for ${extractorResult.fileName}:`, openaiError);
+            
+            if (openaiError instanceof Error && openaiError.name === 'AbortError') {
+              results.push({
+                success: false,
+                filename: extractorResult.fileName,
+                text: extractorResult.text,
+                page_count: extractorResult.page_count,
+                character_count: extractorResult.character_count,
+                error: 'OpenAI processing timed out'
+              });
+            } else {
+              results.push({
+                success: false,
+                filename: extractorResult.fileName,
+                text: extractorResult.text,
+                page_count: extractorResult.page_count,
+                character_count: extractorResult.character_count,
+                error: 'OpenAI processing failed'
+              });
+            }
+            failedFiles++;
           }
 
+        } catch (error) {
+          console.error(`Error processing ${extractorResult.fileName}:`, error);
           results.push({
-            success: true,
-            filename: extractorResult.filename,
+            success: false,
+            filename: extractorResult.fileName,
             text: extractorResult.text,
             page_count: extractorResult.page_count,
             character_count: extractorResult.character_count,
-            extractedData: fields
-          });
-
-          processedFiles++;
-
-        } catch (parseError) {
-          console.error(`[OpenAI JSON parse error for ${extractorResult.filename}]`, parseError);
-          
-          // Return fallback response for this file
-          results.push({
-            success: true,
-            filename: extractorResult.filename,
-            text: extractorResult.text,
-            page_count: extractorResult.page_count,
-            character_count: extractorResult.character_count,
-            extractedData: { 
-              error: 'Failed to parse AI response',
-              name: undefined,
-              employer: undefined,
-              time_period_from: undefined,
-              time_period_to: undefined,
-              bruttolohn: undefined,
-              lohnsteuer: undefined,
-              solidaritaetszuschlag: undefined,
-              year: undefined
-            }
+            error: 'Processing error'
           });
           failedFiles++;
         }
-
-      } catch (aiError) {
-        console.error(`[OpenAI API error for ${extractorResult.filename}]`, aiError);
-        
-        results.push({
-          success: false,
-          filename: extractorResult.filename,
-          text: extractorResult.text,
-          page_count: extractorResult.page_count,
-          character_count: extractorResult.character_count,
-          error: `AI processing failed: ${aiError instanceof Error ? aiError.message : 'Unknown error'}`
-        });
-        failedFiles++;
       }
+
+      console.log(`Completed processing: ${processedFiles} successful, ${failedFiles} failed`);
+
+      return NextResponse.json({
+        success: true,
+        total_files: files.length,
+        processed_files: processedFiles,
+        failed_files: failedFiles,
+        results: results,
+        summary: {
+          total_bruttolohn: Math.round(totalBruttolohn * 100) / 100,
+          total_lohnsteuer: Math.round(totalLohnsteuer * 100) / 100,
+          total_solidaritaetszuschlag: Math.round(totalSolidaritaetszuschlag * 100) / 100,
+          time_periods: timePeriods
+        }
+      });
+
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      console.error('PDF extraction service fetch error:', fetchError);
+      
+      if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+        return NextResponse.json({ 
+          error: 'PDF extraction service timeout. Please try with fewer or smaller files.' 
+        }, { status: 504 });
+      }
+      
+      return NextResponse.json({ 
+        error: 'PDF extraction service unavailable. Please try again later.' 
+      }, { status: 503 });
     }
-
-    // Create summary
-    const summary: TaxSummary = {
-      total_bruttolohn: Math.round(totalBruttolohn * 100) / 100, // Round to 2 decimal places
-      total_lohnsteuer: Math.round(totalLohnsteuer * 100) / 100,
-      total_solidaritaetszuschlag: Math.round(totalSolidaritaetszuschlag * 100) / 100,
-      processed_files: processedFiles,
-      failed_files: failedFiles,
-      time_periods: timePeriods
-    };
-
-    const response: MultiPDFExtractionResponse = {
-      success: true,
-      total_files: files.length,
-      successful_extractions: processedFiles,
-      failed_extractions: failedFiles,
-      results,
-      summary
-    };
-
-    return NextResponse.json(response);
 
   } catch (error) {
     console.error('Multiple PDF extraction error:', error);
-    return NextResponse.json(
-      { error: `Multiple PDF extraction failed: ${error instanceof Error ? error.message : 'Unknown error'}` },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      error: 'Extraction failed',
+      details: error instanceof Error ? error.message : 'Service timeout - please try again'
+    }, { status: 500 });
   }
 }
