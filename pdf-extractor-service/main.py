@@ -501,72 +501,10 @@ def health():
         "tracing_enabled": tracing_enabled
     }
 
-@app.post("/extract-text")
-async def extract_text(file: UploadFile = File(...)):
+@app.post("/extract")
+async def extract_pdfs(files: List[UploadFile] = File(...)):
     """
-    Extract text from uploaded PDF file (single file endpoint for backward compatibility)
-    
-    Args:
-        file: PDF file to extract text from
-        
-    Returns:
-        dict: Contains extracted text and metadata
-    """
-    try:
-        # Validate file type
-        if not file.filename or not file.filename.lower().endswith('.pdf'):
-            raise HTTPException(status_code=400, detail="Only PDF files are supported")
-        
-        # Validate file size (max 10MB)
-        content = await file.read()
-        if len(content) > 10 * 1024 * 1024:  # 10MB limit
-            raise HTTPException(status_code=400, detail="File too large. Maximum size is 10MB")
-        
-        logger.info(f"Processing file: {file.filename} ({len(content)} bytes)")
-        
-        # Extract text using helper function with timeout
-        import asyncio
-        try:
-            # Run extraction with timeout
-            result = await asyncio.wait_for(
-                asyncio.to_thread(extract_text_from_file, content, file.filename),
-                timeout=30.0  # 30 second timeout
-            )
-        except asyncio.TimeoutError:
-            logger.error(f"Extraction timeout for {file.filename}")
-            return {
-                "success": False,
-                "filename": file.filename,
-                "text": "",
-                "page_count": 0,
-                "character_count": 0,
-                "error": "Extraction timed out. Please try with a smaller file."
-            }
-        
-        if not result["success"]:
-            logger.warning(f"Extraction failed for {file.filename}: {result.get('error', 'Unknown error')}")
-            return result
-        
-        logger.info(f"Successfully extracted text from {file.filename}")
-        return result
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error processing {file.filename}: {str(e)}")
-        return {
-            "success": False,
-            "filename": file.filename,
-            "text": "",
-            "page_count": 0,
-            "character_count": 0,
-            "error": f"Processing error: {str(e)}"
-        }
-
-@app.post("/extract-multiple")
-async def extract_multiple(files: List[UploadFile] = File(...)):
-    """
-    Extract text from multiple uploaded PDF files
+    Unified endpoint for extracting text from PDF files (single or multiple)
     
     Args:
         files: List of PDF files to extract text from
@@ -574,26 +512,37 @@ async def extract_multiple(files: List[UploadFile] = File(...)):
     Returns:
         dict: Contains results for each file and summary statistics
     """
+    import time
+    start_time = time.time()
+    
     try:
         if not files:
             raise HTTPException(status_code=400, detail="No files provided")
+        
+        # Validate request size
+        if len(files) > 10:
+            raise HTTPException(status_code=400, detail="Maximum 10 files allowed per request")
+        
+        logger.info(f"Processing {len(files)} files with unified extract endpoint")
         
         results = []
         successful_extractions = 0
         failed_extractions = 0
         total_pages = 0
         total_characters = 0
-        total_chunks = 0
+        total_size = 0
         
-        for file in files:
+        for i, file in enumerate(files):
+            logger.info(f"Processing file {i+1}/{len(files)}: {file.filename}")
+            
             # Validate file type
             if not file.filename or not file.filename.lower().endswith('.pdf'):
                 result = {
-                    "success": False,
-                    "filename": file.filename or "unknown",
+                    "fileName": file.filename or "unknown",
                     "text": "",
                     "page_count": 0,
                     "character_count": 0,
+                    "status": "error",
                     "error": "Only PDF files are supported"
                 }
                 results.append(result)
@@ -602,20 +551,99 @@ async def extract_multiple(files: List[UploadFile] = File(...)):
             
             # Read file content
             content = await file.read()
+            file_size = len(content)
+            total_size += file_size
             
-            # Extract text using helper function
-            result = extract_text_from_file(content, file.filename)
-            results.append(result)
+            # Validate file size (max 10MB per file)
+            if file_size > 10 * 1024 * 1024:
+                result = {
+                    "fileName": file.filename,
+                    "text": "",
+                    "page_count": 0,
+                    "character_count": 0,
+                    "status": "error",
+                    "error": "File too large. Maximum size is 10MB per file"
+                }
+                results.append(result)
+                failed_extractions += 1
+                continue
             
-            if result["success"]:
-                successful_extractions += 1
-                total_pages += result["page_count"]
-                total_characters += result["character_count"]
-                total_chunks += result.get("chunks_count", 0)
-            else:
+            # Validate total payload size (max 50MB)
+            if total_size > 50 * 1024 * 1024:
+                result = {
+                    "fileName": file.filename,
+                    "text": "",
+                    "page_count": 0,
+                    "character_count": 0,
+                    "status": "error",
+                    "error": "Total payload too large. Maximum size is 50MB"
+                }
+                results.append(result)
+                failed_extractions += 1
+                continue
+            
+            try:
+                # Extract text using helper function with timeout
+                import asyncio
+                try:
+                    # Run extraction with timeout
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(extract_text_from_file, content, file.filename),
+                        timeout=30.0  # 30 second timeout
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(f"Extraction timeout for {file.filename}")
+                    result = {
+                        "success": False,
+                        "filename": file.filename,
+                        "text": "",
+                        "page_count": 0,
+                        "character_count": 0,
+                        "error": "Extraction timed out. Please try with a smaller file."
+                    }
+                
+                # Convert to unified response format
+                if result["success"]:
+                    unified_result = {
+                        "fileName": file.filename,
+                        "text": result["text"],
+                        "page_count": result["page_count"],
+                        "character_count": result["character_count"],
+                        "status": "success",
+                        "metadata": result.get("metadata", {})
+                    }
+                    successful_extractions += 1
+                    total_pages += result["page_count"]
+                    total_characters += result["character_count"]
+                else:
+                    unified_result = {
+                        "fileName": file.filename,
+                        "text": "",
+                        "page_count": 0,
+                        "character_count": 0,
+                        "status": "error",
+                        "error": result.get("error", "Extraction failed")
+                    }
+                    failed_extractions += 1
+                
+                results.append(unified_result)
+                
+            except Exception as e:
+                logger.error(f"Error processing {file.filename}: {str(e)}")
+                results.append({
+                    "fileName": file.filename,
+                    "text": "",
+                    "page_count": 0,
+                    "character_count": 0,
+                    "status": "error",
+                    "error": f"Processing error: {str(e)}"
+                })
                 failed_extractions += 1
         
-        logger.info(f"Processed {len(files)} files: {successful_extractions} successful, {failed_extractions} failed")
+        processing_time = time.time() - start_time
+        
+        logger.info(f"Completed processing {len(files)} files in {processing_time:.2f}s: "
+                   f"{successful_extractions} successful, {failed_extractions} failed")
         
         return {
             "success": True,
@@ -624,15 +652,32 @@ async def extract_multiple(files: List[UploadFile] = File(...)):
             "failed_extractions": failed_extractions,
             "total_pages": total_pages,
             "total_characters": total_characters,
-            "total_chunks": total_chunks,
+            "processing_time_seconds": round(processing_time, 2),
             "results": results
         }
             
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error processing multiple files: {str(e)}")
+        logger.error(f"Unexpected error processing files: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+# Legacy endpoints - DEPRECATED (kept for backward compatibility but will be removed)
+@app.post("/extract-text")
+async def extract_text_legacy(file: UploadFile = File(...)):
+    """
+    DEPRECATED: Legacy single file endpoint - use /extract instead
+    """
+    logger.warning("Legacy /extract-text endpoint called - use /extract instead")
+    return await extract_pdfs([file])
+
+@app.post("/extract-multiple")
+async def extract_multiple_legacy(files: List[UploadFile] = File(...)):
+    """
+    DEPRECATED: Legacy multiple files endpoint - use /extract instead
+    """
+    logger.warning("Legacy /extract-multiple endpoint called - use /extract instead")
+    return await extract_pdfs(files)
 
 if __name__ == "__main__":
     import uvicorn
