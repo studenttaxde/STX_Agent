@@ -17,13 +17,22 @@ export async function POST(request: NextRequest) {
     }
 
     // Limit number of files to prevent timeouts
-    if (files.length > 3) {
+    if (files.length > 2) {
       return NextResponse.json({ 
-        error: 'Too many files. Maximum 3 files allowed to prevent timeouts.' 
+        error: 'Too many files. Maximum 2 files allowed to prevent timeouts.' 
       }, { status: 400 });
     }
 
     console.log(`Processing ${files.length} files with multiple PDF extraction`);
+
+    // Check file sizes to prevent timeouts
+    for (const file of files) {
+      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+        return NextResponse.json({ 
+          error: `File ${file.name} is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum file size is 5MB to prevent timeouts.` 
+        }, { status: 400 });
+      }
+    }
 
     // Forward the files to the PDF extraction microservice
     const extractorFormData = new FormData();
@@ -35,7 +44,7 @@ export async function POST(request: NextRequest) {
 
     // Add timeout for PDF extraction service call
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 6000); // 6 seconds for PDF extraction
+    const timeoutId = setTimeout(() => controller.abort(), 4000); // 4 seconds for PDF extraction
 
     try {
       const extractorResponse = await fetch(`${PDF_EXTRACTOR_URL}/extract`, {
@@ -164,7 +173,7 @@ export async function POST(request: NextRequest) {
         try {
           // Process with OpenAI to extract German tax fields (with timeout)
           const openaiController = new AbortController();
-          const openaiTimeoutId = setTimeout(() => openaiController.abort(), 8000); // 8 seconds per file (increased from 3)
+          const openaiTimeoutId = setTimeout(() => openaiController.abort(), 3000); // 3 seconds per file
 
           try {
             console.log(`[OpenAI] Processing ${extractorResult.fileName} with ${extractorResult.text.length} characters`);
@@ -350,7 +359,7 @@ Respond ONLY with a valid JSON object containing these fields. Use null for miss
       
       if (fetchError instanceof Error && fetchError.name === 'AbortError') {
         return NextResponse.json({ 
-          error: 'PDF extraction service timeout. Please try with fewer or smaller files.' 
+          error: 'PDF extraction service timeout. Please try with fewer or smaller files (max 2 files, under 5MB each).' 
         }, { status: 504 });
       }
       
