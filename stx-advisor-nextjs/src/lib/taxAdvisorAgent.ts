@@ -1,23 +1,24 @@
+import { createClient } from '@supabase/supabase-js';
 import { ChatOpenAI } from '@langchain/openai';
 import { AgentExecutor, createOpenAIFunctionsAgent } from 'langchain/agents';
 import { ChatPromptTemplate } from '@langchain/core/prompts';
 import { DynamicStructuredTool } from '@langchain/core/tools';
 import { z } from 'zod';
+
 import { 
-  ExtractedData, 
-  UserData, 
   ConversationHistory, 
-  UserStatus, 
-  DeductionQuestion, 
   DeductionAnswer, 
   DeductionFlow, 
+  DeductionQuestion, 
+  ExtractedData, 
   TaxCalculation, 
-  DeductionSummary,
-  TaxAdvisorState
+  UserData, 
+  UserStatus
 } from '@/types';
-import { createClient } from '@supabase/supabase-js';
 
-// User Profile Interface
+/**
+ * User profile data for personalized tax advice
+ */
 export interface UserProfile {
   id: string;
   full_name?: string;
@@ -30,26 +31,36 @@ export interface UserProfile {
   updated_at?: string;
 }
 
+/**
+ * Complete state of the Pfleged tax advisor agent
+ */
 export interface PflegedAgentState {
+  // Core conversation data
   conversationId: string;
   userId?: string;
-  taxYear?: string; // Added for multi-year support
+  taxYear?: string;
   extractedData?: ExtractedData;
+  messages: Array<{ sender: 'user' | 'assistant'; text: string; timestamp: Date }>;
+  
+  // Deduction flow state
   deductionAnswers: Record<string, DeductionAnswer>;
   currentQuestionIndex: number;
   deductionFlow?: DeductionFlow;
+  
+  // Tax calculation state
   taxCalculation?: TaxCalculation;
   lossCarryforward?: {
     used: number;
     remaining: number;
   };
-  isComplete: boolean;
-  messages: Array<{ sender: 'user' | 'assistant'; text: string; timestamp: Date }>;
-  step: 'upload' | 'extract' | 'confirm' | 'questions' | 'calculate' | 'summary';
-  done: boolean;
-  hasInteracted: boolean; // Added for initial analysis check
   
-  // New properties for autonomous tool chaining
+  // Conversation flow state
+  step: 'upload' | 'extract' | 'confirm' | 'questions' | 'calculate' | 'summary';
+  isComplete: boolean;
+  done: boolean;
+  hasInteracted: boolean;
+  
+  // Autonomous tool chaining state
   latestSummary?: string;
   refundEstimate?: number;
   thresholdCheckResult?: {
@@ -57,26 +68,32 @@ export interface PflegedAgentState {
     threshold: number;
     taxableIncome: number;
   };
+  hasRunToolChain: boolean;
+  
+  // Debug and logging
   debugLog: Array<{
     tool: string;
     timestamp: Date;
     input?: any;
     output?: any;
   }>;
-  hasRunToolChain: boolean;
   
-  // User profile for personalized advice
+  // Personalization
   userProfile?: UserProfile | null;
-  
-  // Explanation caching
   lastExplanation?: string;
 }
 
+/**
+ * Pfleged - AI-powered German tax advisor agent
+ * 
+ * Handles tax data analysis, deduction flows, and personalized tax advice
+ * using LangChain and OpenAI for intelligent conversation management.
+ */
 export class PflegedAgent {
   private llm: ChatOpenAI;
   private agentExecutor: AgentExecutor | null = null;
   private state: PflegedAgentState;
-  private agent!: AgentExecutor; // Use definite assignment assertion
+  private agent!: AgentExecutor;
   
   // Supabase client for user profile data
   private supabase = createClient(
@@ -84,7 +101,7 @@ export class PflegedAgent {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
 
-  // Tax-free thresholds by year
+  // Tax-free thresholds by year (Grundfreibetrag)
   private static readonly TAX_FREE_THRESHOLDS: Record<number, number> = {
     2021: 9744,
     2022: 10347,
@@ -92,7 +109,7 @@ export class PflegedAgent {
     2024: 11604
   };
 
-  // Enhanced deduction flows from taxAdvisor.ts
+  // Deduction flows mapped by user status
   private readonly deductionFlowMap: Record<UserStatus, DeductionFlow> = {
     bachelor: {
       status: 'bachelor',
@@ -234,6 +251,9 @@ export class PflegedAgent {
     }
   };
 
+  /**
+   * Initialize the Pfleged agent with OpenAI LLM and default state
+   */
   constructor() {
     this.llm = new ChatOpenAI({
       modelName: 'gpt-4o',
@@ -249,17 +269,23 @@ export class PflegedAgent {
       messages: [],
       step: 'upload',
       done: false,
-      hasInteracted: false, // Initialize hasInteracted
-      debugLog: [], // Initialize debugLog
-      hasRunToolChain: false, // Initialize hasRunToolChain
-      userProfile: null // Initialize userProfile
+      hasInteracted: false,
+      debugLog: [],
+      hasRunToolChain: false,
+      userProfile: null
     };
   }
 
+  /**
+   * Generate a unique conversation ID for session tracking
+   */
   private generateConversationId(): string {
     return `pfleged_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
+  /**
+   * Load user profile from Supabase for personalized advice
+   */
   async loadUserProfile(userId: string, taxYear?: string): Promise<UserProfile | null> {
     try {
       let query = this.supabase
@@ -286,6 +312,11 @@ export class PflegedAgent {
     }
   }
 
+  /**
+   * Create LangChain tools for the AI agent
+   * 
+   * Defines all available tools that the agent can use during conversation
+   */
   private createTools() {
     return [
       new DynamicStructuredTool({
@@ -296,7 +327,6 @@ export class PflegedAgent {
         }),
         func: async (input) => {
           try {
-            // Use the unified setExtractedData method
             this.setExtractedData(input.data);
             
             const data = this.state.extractedData;
@@ -304,7 +334,6 @@ export class PflegedAgent {
               throw new Error('Failed to parse extracted data');
             }
             
-            // Check if we have enough data for autonomous analysis
             const hasBasicData = data.gross_income && data.income_tax_paid && data.year;
             
             return JSON.stringify({
@@ -335,14 +364,12 @@ export class PflegedAgent {
         }),
         func: async (input) => {
           try {
-            // Use the unified getTaxCalculation method
             const calculation = this.getTaxCalculation() as TaxCalculation;
             
             if (!calculation) {
               throw new Error('No extracted data available for calculation');
             }
             
-            // Log tool usage
             this.state.debugLog.push({
               tool: 'calculateTaxSummary',
               timestamp: new Date(),
@@ -373,14 +400,12 @@ export class PflegedAgent {
         }),
         func: async (input) => {
           try {
-            // Use the unified checkTaxThreshold method
             const result = this.checkTaxThreshold(input.taxableIncome, input.year);
             
             if (!result) {
               throw new Error('Unable to check tax threshold - no data available');
             }
             
-            // Log tool usage
             this.state.debugLog.push({
               tool: 'checkTaxThreshold',
               timestamp: new Date(),
@@ -1220,7 +1245,11 @@ Please answer with the amount in euros, or "no" if you don't have this expense.`
     };
   }
 
-  // Legacy method for backward compatibility - now uses unified getTaxCalculation
+  /**
+   * Generate final tax summary (legacy method for backward compatibility)
+   * 
+   * Now uses the unified getTaxCalculation method internally
+   */
   private generateFinalSummary(): string {
     const result = this.getTaxCalculation({ 
       includeSummary: true, 
@@ -1246,7 +1275,12 @@ Please answer with the amount in euros, or "no" if you don't have this expense.`
     return "I don't have your tax data to generate a summary.";
   }
 
-  // Unified data analysis and extraction method
+  /**
+   * Set extracted tax data from PDF documents
+   * 
+   * Handles both ExtractedData objects and JSON strings for flexibility
+   * Updates agent state and triggers autonomous analysis when basic data is available
+   */
   setExtractedData(data: ExtractedData | string): void {
     let extractedData: ExtractedData;
     
@@ -1265,7 +1299,6 @@ Please answer with the amount in euros, or "no" if you don't have this expense.`
     this.state.extractedData = extractedData;
     this.state.step = 'extract';
     
-    // Log tool usage for debugging
     this.state.debugLog.push({
       tool: 'setExtractedData',
       timestamp: new Date(),
@@ -1273,11 +1306,9 @@ Please answer with the amount in euros, or "no" if you don't have this expense.`
       output: { success: true }
     });
     
-    // Check if we have enough data for autonomous analysis
     const hasBasicData = extractedData.gross_income && extractedData.income_tax_paid && extractedData.year;
     
     if (hasBasicData) {
-      // Trigger autonomous tool chain in next interaction
       this.state.hasRunToolChain = false;
     }
     
@@ -1290,10 +1321,16 @@ Please answer with the amount in euros, or "no" if you don't have this expense.`
     });
   }
 
+  /**
+   * Add a user message to the conversation history
+   */
   addUserMessage(message: string): void {
     this.state.messages.push({ sender: 'user', text: message, timestamp: new Date() });
   }
 
+  /**
+   * Add an agent message to the conversation history
+   */
   addAgentMessage(message: string): void {
     this.state.messages.push({ sender: 'assistant', text: message, timestamp: new Date() });
   }
@@ -1314,7 +1351,12 @@ Please answer with the amount in euros, or "no" if you don't have this expense.`
 ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszuschlag).toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n` : ''}📅 **Detected Tax Year:** ${year || "Not specified"}`;
   }
 
-  // Unified threshold checking method
+  /**
+   * Check if taxable income is below the tax-free threshold for a given year
+   * 
+   * Returns detailed threshold information including the threshold amount,
+   * whether income is below threshold, and the year being checked
+   */
   checkTaxThreshold(taxableIncome?: number, year?: number): {
     isBelowThreshold: boolean;
     threshold: number;
@@ -1337,14 +1379,12 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
       year: checkYear
     };
 
-    // Update state for tracking
     this.state.thresholdCheckResult = {
       isBelowThreshold,
       threshold,
       taxableIncome: checkTaxableIncome
     };
 
-    // Log for debugging
     console.log(`Threshold check: year=${checkYear}, income=${checkTaxableIncome}, threshold=${threshold}, isBelow=${isBelowThreshold}`);
     
     return result;
@@ -1594,7 +1634,12 @@ ${explanation}
     return Object.values(this.state.deductionAnswers);
   }
 
-  // Unified tax calculation method that handles both calculation and summary generation
+  /**
+   * Calculate tax summary with deductions and refund estimation
+   * 
+   * Unified method that can return calculation data, formatted summary, or both
+   * Supports personalization and multiple output formats
+   */
   getTaxCalculation(options?: {
     includeSummary?: boolean;
     includePersonalization?: boolean;
@@ -1659,7 +1704,12 @@ ${explanation}
     }
   }
 
-  // Unified tax summary generation
+  /**
+   * Generate a formatted tax summary with deductions and recommendations
+   * 
+   * Creates a comprehensive markdown summary including refund amount,
+   * applied deductions, missing information, and personalized advice
+   */
   private generateTaxSummary(calculation: TaxCalculation, includePersonalization: boolean = false): string {
     const { grossIncome, totalDeductions, taxableIncome, taxPaid, refund, year } = calculation;
     const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 10908;
@@ -1754,6 +1804,12 @@ ${requiredDocs.map(doc => `- ${doc}`).join('\n')}${personalizedAdvice}
 *This summary is based on the information provided. For official filing, please consult with a tax professional.*`;
   }
 
+  /**
+   * Calculate German progressive tax based on taxable income and year
+   * 
+   * Implements the German tax brackets with proper progressive rates
+   * Falls back to simplified calculation for unsupported years
+   */
   private calculateGermanTax(taxableIncome: number, year: number | undefined): number {
     // German progressive tax calculation for 2021
     if (year === 2021) {
@@ -1768,6 +1824,11 @@ ${requiredDocs.map(doc => `- ${doc}`).join('\n')}${personalizedAdvice}
     return Math.max(0, taxableIncome * 0.15);
   }
 
+  /**
+   * Reset the agent state for a new conversation
+   * 
+   * Clears all data and returns to initial upload state
+   */
   reset(): void {
     this.state = {
       conversationId: this.generateConversationId(),
@@ -1783,8 +1844,12 @@ ${requiredDocs.map(doc => `- ${doc}`).join('\n')}${personalizedAdvice}
     };
   }
 
+  /**
+   * Reset agent state for filing another tax year
+   * 
+   * Preserves conversation ID but clears all other state
+   */
   private resetForNewYear(): void {
-    // Reset state for new year but preserve conversation ID
     const conversationId = this.state.conversationId;
     
     this.state = {
@@ -1796,14 +1861,20 @@ ${requiredDocs.map(doc => `- ${doc}`).join('\n')}${personalizedAdvice}
       messages: [],
       step: 'upload',
       done: false,
-      hasInteracted: false, // Reset hasInteracted
-      debugLog: [], // Reset debugLog
-      hasRunToolChain: false // Reset hasRunToolChain
+      hasInteracted: false,
+      debugLog: [],
+      hasRunToolChain: false
     };
     
     console.log('State reset for new year. Conversation ID preserved:', conversationId);
   }
 
+  /**
+   * Handle AI-powered deduction conversation
+   * 
+   * Uses AI to analyze user responses and determine next actions
+   * Automatically processes amounts and moves through deduction questions
+   */
   private async handleAIDeductionConversation(input: string): Promise<string> {
     try {
       // Use AI to analyze the user's response and determine next action
