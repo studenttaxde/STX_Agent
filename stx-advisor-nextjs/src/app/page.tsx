@@ -286,6 +286,7 @@ function AdvisorChat() {
         extractedData: {
           ...aggregatedData,
           gross_income: aggregatedData.totalIncome,
+          income_tax_paid: aggregatedData.lohnsteuer || 0,
           year: safeYear
         },
         multiPDFData: {
@@ -310,8 +311,8 @@ function AdvisorChat() {
           employer: aggregatedData.employers.join(', ') || 'Unknown',
           total_hours: 0, // Not available from PDF extraction
           gross_income: aggregatedData.totalIncome,
-          income_tax_paid: aggregatedData.lohnsteuer || 0, // Extract from PDF data
-          solidaritaetszuschlag: aggregatedData.solidaritaetszuschlag || 0, // Extract from PDF data
+          income_tax_paid: aggregatedData.lohnsteuer || 0,
+          solidaritaetszuschlag: aggregatedData.solidaritaetszuschlag || 0,
           year: safeYear,
           // Additional fields that might be useful
           totalIncome: aggregatedData.totalIncome,
