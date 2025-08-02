@@ -620,11 +620,11 @@ export class PflegedAgent {
       ['system', `You are Pfleged, an expert German tax advisor with deep knowledge of German tax law, deductions, and filing procedures. You guide users through their tax filing process with intelligence, empathy, and accuracy.
 
 Your core responsibilities:
-1. **Analyze extracted tax data** - Understand income, taxes paid, employer info, and tax year
+1. **Analyze extracted tax data** - Use analyzeExtractedData tool when user uploads documents
 2. **Provide intelligent insights** - Explain what you found and what it means for their tax situation
-3. **Guide through deductions** - Ask relevant questions based on their status (student, employee, etc.)
-4. **Calculate refunds** - Determine if they're eligible for refunds and estimate amounts
-5. **Handle complex scenarios** - Address loss carryforward, multiple employers, special deductions
+3. **Guide through deductions** - Use askDeductionQuestions tool for personalized deduction questions
+4. **Calculate refunds** - Use calculateTaxSummary tool to determine refunds and estimates
+5. **Handle complex scenarios** - Use applyLossCarryforward tool for previous year losses
 6. **Maintain conversation flow** - Keep the conversation natural and helpful
 
 **Key German Tax Knowledge:**
@@ -641,6 +641,13 @@ Your core responsibilities:
 - Provide clear next steps
 - Show empathy for tax filing stress
 - Use German tax terminology appropriately
+
+**IMPORTANT: Always use tools when appropriate:**
+- When user uploads documents → Use analyzeExtractedData
+- When user asks about calculations → Use calculateTaxSummary
+- When user needs deduction questions → Use askDeductionQuestions
+- When user has previous losses → Use applyLossCarryforward
+- When generating final summary → Use generateFinalSummary
 
 **Current Session Context:**
 - Conversation ID: ${this.state.conversationId}
@@ -704,9 +711,21 @@ Your core responsibilities:
         step: this.state.step
       });
 
-      // Run agent
+      // For initial analysis, use a more direct approach
+      if (input.toLowerCase().includes('analyze') || input.toLowerCase().includes('initial')) {
+        console.log('Using direct analysis approach');
+        return this.handleInitialAnalysis();
+      }
+
+      // Run agent with explicit tool usage guidance
+      const enhancedInput = `${input}
+
+IMPORTANT: Use the available tools to help the user. If they're asking about tax data, use analyzeExtractedData. If they're asking about calculations, use calculateTaxSummary. If they're asking about deductions, use askDeductionQuestions. Always provide helpful, professional German tax advice.`;
+
+      console.log('Enhanced input for agent:', enhancedInput);
+
       const result = await this.agentExecutor!.invoke({
-        input: input
+        input: enhancedInput
       });
 
       console.log('Agent execution result:', result);
@@ -732,10 +751,77 @@ Your core responsibilities:
 
       // Provide a more helpful fallback response based on the input
       if (input.toLowerCase().includes('analyze') || input.toLowerCase().includes('initial')) {
-        return this.buildInitialSummary();
+        return this.handleInitialAnalysis();
       } else {
-        return 'I encountered an error while processing your request. Please try again or contact support.';
+        return this.handleConversationFallback(input);
       }
+    }
+  }
+
+  private handleInitialAnalysis(): string {
+    if (!this.state.extractedData) {
+      return "I don't see any tax data to analyze. Please upload your tax documents first.";
+    }
+
+    const { full_name, employer, gross_income, income_tax_paid, solidaritaetszuschlag, year } = this.state.extractedData;
+    
+    let response = `Here's what I found from your documents:
+
+👤 **Name:** ${full_name || "N/A"}
+🏢 **Employer:** ${employer || "N/A"}
+💶 **Gross Income:** €${Number(gross_income || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+💰 **Lohnsteuer Paid:** €${Number(income_tax_paid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszuschlag).toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n` : ''}📅 **Detected Tax Year:** ${year || "Not specified"}
+
+Can you please confirm that the tax year you want to file is ${year}? (yes/no)
+
+If this is correct, I'll help you with your tax filing process. If not, please upload the correct PDF for the year you want to file.`;
+
+    return response;
+  }
+
+  private handleConversationFallback(input: string): string {
+    const lastUserMessage = input.toLowerCase();
+    
+    if (lastUserMessage.includes('yes') || lastUserMessage.includes('correct')) {
+      if (!this.state.extractedData) {
+        return "I don't have your tax data yet. Please upload your tax documents first.";
+      }
+      
+      const { year, gross_income } = this.state.extractedData;
+      const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 10908;
+      
+      if (gross_income && gross_income < threshold) {
+        return `Perfect! Since your income (€${Number(gross_income).toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is below the tax-free threshold (€${threshold.toLocaleString('de-DE')}) for ${year}, you are eligible for a **full refund** of your tax paid.
+
+Would you like me to help you file for another year?`;
+      } else {
+        return `Since your income exceeds the tax-free threshold, let's check for deductible expenses to reduce your taxable income.
+
+Please select your status for the year:
+1. **bachelor** (Bachelor's student)
+2. **master** (Master's student)  
+3. **new_employee** (Started job after graduation)
+4. **full_time** (Full-time employee)`;
+      }
+    } else if (lastUserMessage.includes('no') || lastUserMessage.includes('wrong')) {
+      return "Please upload the correct PDF for the year you want to file.";
+    } else if (/^[1-4]$/.test(lastUserMessage) || ['bachelor', 'master', 'new_employee', 'full_time'].includes(lastUserMessage)) {
+      const status = /^[1-4]$/.test(lastUserMessage) ? 
+        ['bachelor', 'master', 'new_employee', 'full_time'][parseInt(lastUserMessage) - 1] : 
+        lastUserMessage;
+      
+      return `Perfect! I've set your status as: **${status.toUpperCase()}**
+
+Based on your extracted data, here's your tax summary:
+
+**Tax Year:** ${this.state.extractedData?.year}
+**Gross Income:** €${Number(this.state.extractedData?.gross_income || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+**Tax Paid:** €${Number(this.state.extractedData?.income_tax_paid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+
+I'm now ready to help you with your tax filing. Would you like to proceed with deductions?`;
+    } else {
+      return "I'm here to help with your German tax filing. Please follow the conversation flow and let me know if you need any clarification.";
     }
   }
 
