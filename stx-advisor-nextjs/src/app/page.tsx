@@ -190,42 +190,47 @@ function AdvisorChat() {
       }
 
       successfulResults.forEach((result: any) => {
-        // Check if result has extractedData (successful extraction) or is a failed result
-        if (!result.success || !result.extractedData) {
+        // Check if result is successful
+        if (!result.success) {
           console.warn(`Skipping failed result for ${result.filename}:`, result.error || 'No extracted data')
           return
         }
 
-        const resultData = result.extractedData
+        // Handle both successful AI processing and fallback cases
+        const resultData = result.extractedData || {}
+        console.log(`Processing result for ${result.filename}:`, resultData)
 
         // Aggregate income - check multiple possible field names
         const income = resultData.bruttolohn || resultData.bruttoarbeitslohn || resultData.gross_income || 0
-        if (income) {
+        if (income && income !== 0) {
           const parsedIncome = parseFloat(income) || 0
           aggregatedData.totalIncome += parsedIncome
+          console.log(`Added income: ${parsedIncome} for ${result.filename}`)
         }
 
         // Aggregate Lohnsteuer (income tax paid)
         const lohnsteuer = resultData.lohnsteuer || resultData.income_tax_paid || 0
-        if (lohnsteuer) {
+        if (lohnsteuer && lohnsteuer !== 0) {
           const parsedLohnsteuer = parseFloat(lohnsteuer) || 0
           aggregatedData.lohnsteuer += parsedLohnsteuer
+          console.log(`Added lohnsteuer: ${parsedLohnsteuer} for ${result.filename}`)
         }
 
         // Aggregate Solidaritaetszuschlag
         const solidaritaetszuschlag = resultData.solidaritaetszuschlag || 0
-        if (solidaritaetszuschlag) {
+        if (solidaritaetszuschlag && solidaritaetszuschlag !== 0) {
           const parsedSolidaritaetszuschlag = parseFloat(solidaritaetszuschlag) || 0
           aggregatedData.solidaritaetszuschlag += parsedSolidaritaetszuschlag
+          console.log(`Added solidaritaetszuschlag: ${parsedSolidaritaetszuschlag} for ${result.filename}`)
         }
 
         // Collect employers
-        if (resultData.employer) {
+        if (resultData.employer && resultData.employer !== 'Unknown') {
           aggregatedData.employers.push(resultData.employer)
         }
 
         // Collect years
-        if (resultData.year) {
+        if (resultData.year && resultData.year !== 0) {
           aggregatedData.years.add(resultData.year)
         }
 
@@ -234,6 +239,47 @@ function AdvisorChat() {
           filename: result.filename,
           data: resultData
         })
+
+        // If no AI data was extracted, try to extract basic info from text
+        if (!resultData.bruttolohn && !resultData.lohnsteuer && result.text) {
+          console.log(`Attempting basic extraction from text for ${result.filename}`)
+          
+          // Try to extract basic information from the text using regex
+          const text = result.text.toLowerCase()
+          
+          // Look for common German tax document patterns
+          const bruttolohnMatch = text.match(/bruttoarbeitslohn[:\s]*([\d.,]+)/i)
+          const lohnsteuerMatch = text.match(/einbehaltene lohnsteuer[:\s]*([\d.,]+)/i)
+          const solidaritaetszuschlagMatch = text.match(/einbehaltener solidaritätszuschlag[:\s]*([\d.,]+)/i)
+          const yearMatch = text.match(/(\d{4})/g)
+          
+          if (bruttolohnMatch) {
+            const amount = parseFloat(bruttolohnMatch[1].replace(/[.,]/g, '').replace(',', '.')) || 0
+            aggregatedData.totalIncome += amount
+            console.log(`Extracted bruttolohn from text: ${amount}`)
+          }
+          
+          if (lohnsteuerMatch) {
+            const amount = parseFloat(lohnsteuerMatch[1].replace(/[.,]/g, '').replace(',', '.')) || 0
+            aggregatedData.lohnsteuer += amount
+            console.log(`Extracted lohnsteuer from text: ${amount}`)
+          }
+          
+          if (solidaritaetszuschlagMatch) {
+            const amount = parseFloat(solidaritaetszuschlagMatch[1].replace(/[.,]/g, '').replace(',', '.')) || 0
+            aggregatedData.solidaritaetszuschlag += amount
+            console.log(`Extracted solidaritaetszuschlag from text: ${amount}`)
+          }
+          
+          if (yearMatch && yearMatch.length > 0) {
+            const years = yearMatch.map((y: string) => parseInt(y)).filter((y: number) => y > 2000 && y < 2030)
+            if (years.length > 0) {
+              const year = Math.max(...years)
+              aggregatedData.years.add(year)
+              console.log(`Extracted year from text: ${year}`)
+            }
+          }
+        }
       })
 
       console.log('Final aggregated data:', aggregatedData)
