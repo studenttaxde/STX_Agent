@@ -223,3 +223,72 @@ export interface FileUploadProgress {
   status: 'pending' | 'uploading' | 'processing' | 'completed' | 'error';
   error?: string;
 }
+
+// ===== DATABASE TYPES (Consolidated from services) =====
+
+// User Profile Types
+export interface UserProfile {
+  id: string;
+  email?: string;
+  full_name?: string;
+  age?: number;
+  job_type?: 'employee' | 'freelancer' | 'student' | 'unemployed';
+  marital_status?: 'single' | 'married' | 'divorced' | 'widowed';
+  income_brackets?: 'low' | 'medium' | 'high';
+  known_deductions?: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+// Tax Filing Types
+export interface TaxFiling {
+  id: string;
+  user_id: string;
+  year: number;
+  gross_income: number;
+  income_tax_paid: number;
+  employer: string;
+  full_name: string;
+  taxable_income?: number;
+  refund?: number;
+  deductions: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+// User Deduction Types
+export interface UserDeduction {
+  id: string;
+  user_id: string;
+  category: string;
+  amount: number;
+  details: string;
+  year: number;
+  created_at: string;
+}
+
+// Loss Carryforward Types
+export interface LossCarryforwardData {
+  used: number;
+  remaining: number;
+  year: number;
+  userId: string;
+}
+
+// Tax Filing Result Types
+export interface TaxFilingResult {
+  user_id: string;
+  tax_year: number;
+  gross_income: number;
+  tax_paid: number;
+  taxable_income: number;
+  total_deductions: number;
+  loss_carryforward_used: number;
+  loss_carryforward_remaining: number;
+  estimated_refund: number;
+  refund_type: 'full' | 'partial' | 'none';
+  refund_reason: string;
+  filing_date: string;
+  filing_json: any;
+  agent_notes?: string;
+}

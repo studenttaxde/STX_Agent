@@ -1,8 +1,8 @@
 "use client"
 
 import { useState, useRef } from 'react'
-import DeductionReview from '@/components/DeductionReview'
-import ClarificationQuestions from '@/components/ClarificationQuestions'
+import DeductionReview from '@/features/tax-filing/DeductionReview'
+import ClarificationQuestions from '@/features/tax-filing/ClarificationQuestions'
 
 interface DeductionItem {
   category: string

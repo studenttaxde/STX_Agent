@@ -13,23 +13,9 @@ import {
   ExtractedData, 
   TaxCalculation, 
   UserData, 
-  UserStatus
+  UserStatus,
+  UserProfile
 } from '@/types';
-
-/**
- * User profile data for personalized tax advice
- */
-export interface UserProfile {
-  id: string;
-  full_name?: string;
-  age?: number;
-  job_type?: 'employee' | 'freelancer' | 'student' | 'unemployed';
-  marital_status?: 'single' | 'married' | 'divorced' | 'widowed';
-  income_brackets?: 'low' | 'medium' | 'high';
-  known_deductions?: string[];
-  created_at?: string;
-  updated_at?: string;
-}
 
 /**
  * Complete state of the Pfleged tax advisor agent
@@ -640,91 +626,7 @@ export class PflegedAgent {
         }
       }),
 
-      new DynamicStructuredTool({
-        name: 'generateFinalSummary',
-        description: 'Generate final tax filing summary with JSON and explanation',
-        schema: z.object({
-          userId: z.string().describe('User ID'),
-          year: z.number().describe('Tax year'),
-          includeJson: z.boolean().describe('Include JSON output')
-        }),
-        func: async (input) => {
-          try {
-            // Calculate tax summary directly
-            const totalDeductions = Object.values(this.state.deductionAnswers)
-              .filter(a => a.answer)
-              .reduce((sum, a) => sum + (a.amount || 0), 0);
 
-            if (!this.state.extractedData) {
-              throw new Error('No extracted data available');
-            }
-
-            const grossIncome = this.state.extractedData.gross_income || 0;
-            const taxableIncome = Math.max(0, grossIncome - totalDeductions);
-            const taxPaid = this.state.extractedData.income_tax_paid || 0;
-            const year = this.state.extractedData.year;
-            const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 0;
-            
-            // Check for Verlustvortrag (loss carryforward)
-            const verlustvortrag = this.state.deductionAnswers['master_verlustvortrag']?.amount || 0;
-            const finalTaxableIncome = Math.max(0, taxableIncome - verlustvortrag);
-            
-            // REFUND FIRST LOGIC: If taxable income is below threshold, full refund
-            let refund = 0;
-            if (finalTaxableIncome <= threshold) {
-              refund = taxPaid; // Full refund when below threshold
-            } else {
-              // If above threshold, calculate proper German tax
-              const estimatedTax = this.calculateGermanTax(finalTaxableIncome, year);
-              refund = Math.max(0, taxPaid - estimatedTax);
-            }
-
-            const summary = {
-              grossIncome,
-              totalDeductions,
-              taxableIncome: finalTaxableIncome,
-              estimatedTax: finalTaxableIncome * 0.15,
-              taxPaid,
-              refund,
-              year: year || 0
-            };
-
-            this.state.taxCalculation = summary;
-            this.state.step = 'summary';
-            this.state.isComplete = true;
-            
-            const finalSummary = {
-              user_id: input.userId,
-              tax_year: input.year,
-              gross_income: grossIncome,
-              tax_paid: taxPaid,
-              taxable_income: finalTaxableIncome,
-              total_deductions: totalDeductions,
-              loss_carryforward_used: verlustvortrag,
-              loss_carryforward_remaining: 0, // Will be calculated based on previous year
-              estimated_refund: refund,
-              refund_type: finalTaxableIncome <= threshold ? 'full' : (refund > 0 ? 'partial' : 'none'),
-              refund_reason: this.generateRefundReason(summary),
-              filing_date: new Date().toISOString().split('T')[0]
-            };
-
-            // Store summary in memory (Supabase integration removed for now)
-            console.log('Tax filing summary generated:', finalSummary);
-
-            return JSON.stringify({
-              success: true,
-              summary: finalSummary,
-              json: input.includeJson ? finalSummary : undefined,
-              message: 'Tax filing summary generated and stored'
-            });
-          } catch (error) {
-            return JSON.stringify({
-              success: false,
-              error: error instanceof Error ? error.message : 'Failed to generate summary'
-            });
-          }
-        }
-      }),
 
       new DynamicStructuredTool({
         name: 'resetForNewYear',
@@ -1245,35 +1147,7 @@ Please answer with the amount in euros, or "no" if you don't have this expense.`
     };
   }
 
-  /**
-   * Generate final tax summary (legacy method for backward compatibility)
-   * 
-   * Now uses the unified getTaxCalculation method internally
-   */
-  private generateFinalSummary(): string {
-    const result = this.getTaxCalculation({ 
-      includeSummary: true, 
-      includePersonalization: true, 
-      format: 'markdown' 
-    });
-    
-    if (typeof result === 'string') {
-      // Save summary to database
-      const calculation = this.getTaxCalculation() as TaxCalculation;
-      if (calculation && this.state.userId && this.state.taxYear) {
-        this.saveTaxSummary(result, calculation.refund).catch(error => {
-          console.error('Error saving tax summary:', error);
-        });
-      }
-      
-      this.state.step = 'summary';
-      this.state.isComplete = true;
-      
-      return result;
-    }
-    
-    return "I don't have your tax data to generate a summary.";
-  }
+
 
   /**
    * Set extracted tax data from PDF documents

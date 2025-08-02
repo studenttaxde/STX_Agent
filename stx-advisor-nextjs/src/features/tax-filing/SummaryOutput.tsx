@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { TaxFilingResult } from '@/lib/supabaseService';
+import { TaxFilingResult } from '@/types';
 
 interface SummaryOutputProps {
   result: TaxFilingResult;

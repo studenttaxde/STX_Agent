@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PflegedAgent } from '@/lib/taxAdvisorAgent';
+import { PflegedAgent } from '@/agent/taxAdvisorAgent';
 import { ExtractedData } from '@/types';
 
 // Store agent instances per session (in production, use Redis or database)

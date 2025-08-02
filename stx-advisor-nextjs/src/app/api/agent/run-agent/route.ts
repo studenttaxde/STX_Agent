@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PflegedAgent } from '@/lib/taxAdvisorAgent';
-import { SupabaseService } from '@/lib/supabaseService';
+import { PflegedAgent } from '@/agent/taxAdvisorAgent';
+import { SupabaseService } from '@/services/supabaseService';
 
 export const maxDuration = 30; // 30 seconds for agent processing
 

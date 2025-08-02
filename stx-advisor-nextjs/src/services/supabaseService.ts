@@ -1,63 +1,19 @@
 import { supabase } from './supabase';
-import { ExtractedData, DeductionSummary, TaxCalculation } from '@/types';
+import { 
+  ExtractedData, 
+  DeductionSummary, 
+  TaxCalculation,
+  UserProfile,
+  TaxFiling,
+  UserDeduction,
+  LossCarryforwardData,
+  TaxFilingResult
+} from '@/types';
 
-export interface LossCarryforwardData {
-  used: number;
-  remaining: number;
-  year: number;
-  userId: string;
-}
-
-export interface TaxFilingResult {
-  user_id: string;
-  tax_year: number;
-  gross_income: number;
-  tax_paid: number;
-  taxable_income: number;
-  total_deductions: number;
-  loss_carryforward_used: number;
-  loss_carryforward_remaining: number;
-  estimated_refund: number;
-  refund_type: 'full' | 'partial' | 'none';
-  refund_reason: string;
-  filing_date: string;
-  filing_json: any;
-  agent_notes?: string;
-}
-
-// Legacy interfaces for backward compatibility
-export interface UserProfile {
-  id: string;
-  email: string | null;
-  full_name: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface TaxFiling {
-  id: string;
-  user_id: string;
-  year: number;
-  gross_income: number;
-  tax_paid: number;
-  total_deductions: number;
-  estimated_refund: number;
-  filing_data: any;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface UserDeduction {
-  id: string;
-  user_id: string;
-  year: number;
-  category: string;
-  amount: number;
-  description: string;
-  created_at: string;
-}
-
-// Generate a simple user ID based on browser fingerprint or create a new one
+/**
+ * Generate a simple user ID based on browser fingerprint or create a new one
+ * @returns A unique user ID string
+ */
 const generateUserId = (): string => {
   // Try to get existing user ID from localStorage
   let userId = localStorage.getItem('stx_user_id')
@@ -71,7 +27,10 @@ const generateUserId = (): string => {
   return userId
 }
 
-// Get or create user profile
+/**
+ * Get or create user profile from Supabase
+ * @returns Promise resolving to UserProfile or null if error
+ */
 export const getUserProfile = async (): Promise<UserProfile | null> => {
   const userId = generateUserId()
   
@@ -116,7 +75,11 @@ export const getUserProfile = async (): Promise<UserProfile | null> => {
   }
 }
 
-// Save tax filing
+/**
+ * Save tax filing data to Supabase
+ * @param filing - Tax filing data to save
+ * @returns Promise resolving to saved TaxFiling or null if error
+ */
 export const saveTaxFiling = async (filing: Omit<TaxFiling, 'id' | 'created_at' | 'updated_at'>): Promise<TaxFiling | null> => {
   try {
     const { data, error } = await supabase
@@ -137,7 +100,11 @@ export const saveTaxFiling = async (filing: Omit<TaxFiling, 'id' | 'created_at' 
   }
 }
 
-// Get tax filings for a user
+/**
+ * Get all tax filings for a specific user
+ * @param userId - User ID to fetch filings for
+ * @returns Promise resolving to array of TaxFiling objects
+ */
 export const getTaxFilings = async (userId: string): Promise<TaxFiling[]> => {
   try {
     const { data, error } = await supabase
@@ -158,7 +125,12 @@ export const getTaxFilings = async (userId: string): Promise<TaxFiling[]> => {
   }
 }
 
-// Get tax filing by year
+/**
+ * Get tax filing for a specific user and year
+ * @param userId - User ID
+ * @param year - Tax year
+ * @returns Promise resolving to TaxFiling or null if not found
+ */
 export const getTaxFilingByYear = async (userId: string, year: number): Promise<TaxFiling | null> => {
   try {
     const { data, error } = await supabase
@@ -180,7 +152,11 @@ export const getTaxFilingByYear = async (userId: string, year: number): Promise<
   }
 }
 
-// Save user deduction
+/**
+ * Save user deduction data to Supabase
+ * @param deduction - Deduction data to save
+ * @returns Promise resolving to saved UserDeduction or null if error
+ */
 export const saveUserDeduction = async (deduction: Omit<UserDeduction, 'id' | 'created_at'>): Promise<UserDeduction | null> => {
   try {
     const { data, error } = await supabase
@@ -201,7 +177,12 @@ export const saveUserDeduction = async (deduction: Omit<UserDeduction, 'id' | 'c
   }
 }
 
-// Get user deductions by year
+/**
+ * Get user deductions for a specific year
+ * @param userId - User ID
+ * @param year - Tax year
+ * @returns Promise resolving to array of UserDeduction objects
+ */
 export const getUserDeductionsByYear = async (userId: string, year: number): Promise<UserDeduction[]> => {
   try {
     const { data, error } = await supabase
@@ -222,7 +203,12 @@ export const getUserDeductionsByYear = async (userId: string, year: number): Pro
   }
 }
 
-// Update user profile
+/**
+ * Update user profile data in Supabase
+ * @param userId - User ID to update
+ * @param updates - Partial UserProfile object with fields to update
+ * @returns Promise resolving to updated UserProfile or null if error
+ */
 export const updateUserProfile = async (userId: string, updates: Partial<UserProfile>): Promise<UserProfile | null> => {
   try {
     const { data, error } = await supabase
@@ -244,7 +230,12 @@ export const updateUserProfile = async (userId: string, updates: Partial<UserPro
   }
 }
 
-// Check if user has existing data for a year
+/**
+ * Check if user has existing tax data for a specific year
+ * @param userId - User ID to check
+ * @param year - Tax year to check
+ * @returns Promise resolving to boolean indicating if data exists
+ */
 export const hasExistingData = async (userId: string, year: number): Promise<boolean> => {
   try {
     const { data, error } = await supabase
@@ -266,7 +257,12 @@ export const hasExistingData = async (userId: string, year: number): Promise<boo
   }
 }
 
-// Get suggested deductions based on previous years
+/**
+ * Get suggested deductions based on previous years' data
+ * @param userId - User ID
+ * @param year - Current tax year
+ * @returns Promise resolving to array of suggested deduction objects
+ */
 export const getSuggestedDeductions = async (userId: string, year: number): Promise<any[]> => {
   try {
     // Get deductions from previous years
@@ -312,9 +308,15 @@ export const getSuggestedDeductions = async (userId: string, year: number): Prom
   }
 }
 
+/**
+ * SupabaseService class providing advanced database operations
+ */
 export class SupabaseService {
   /**
    * Get loss carryforward data for a user and year
+   * @param userId - User ID
+   * @param year - Tax year
+   * @returns Promise resolving to LossCarryforwardData or null if error
    */
   static async getLossCarryforward(userId: string, year: number): Promise<LossCarryforwardData | null> {
     try {
@@ -353,6 +355,10 @@ export class SupabaseService {
 
   /**
    * Apply loss carryforward and update remaining amount
+   * @param userId - User ID
+   * @param year - Tax year
+   * @param amountToApply - Amount of loss carryforward to apply
+   * @returns Promise resolving to object with applied and remaining amounts
    */
   static async applyLossCarryforward(
     userId: string, 
@@ -396,6 +402,12 @@ export class SupabaseService {
 
   /**
    * Store complete tax filing result
+   * @param userId - User ID
+   * @param year - Tax year
+   * @param summary - Deduction summary
+   * @param extractedData - Extracted tax data
+   * @param agentNotes - Optional agent notes
+   * @returns Promise resolving to TaxFilingResult
    */
   static async storeTaxFilingResult(
     userId: string,
@@ -445,6 +457,8 @@ export class SupabaseService {
 
   /**
    * Get user's tax filing history
+   * @param userId - User ID
+   * @returns Promise resolving to array of TaxFilingResult objects
    */
   static async getUserTaxHistory(userId: string): Promise<TaxFilingResult[]> {
     try {
@@ -468,6 +482,10 @@ export class SupabaseService {
 
   /**
    * Log errors to Supabase for monitoring
+   * @param conversationId - Conversation ID for tracking
+   * @param errorType - Type of error
+   * @param errorMessage - Error message
+   * @param additionalData - Additional error data
    */
   static async logError(
     conversationId: string,
@@ -493,6 +511,9 @@ export class SupabaseService {
 
   /**
    * Store conversation state for resuming sessions
+   * @param conversationId - Conversation ID
+   * @param userId - User ID
+   * @param state - Conversation state data
    */
   static async storeConversationState(
     conversationId: string,
@@ -516,6 +537,8 @@ export class SupabaseService {
 
   /**
    * Retrieve conversation state for resuming sessions
+   * @param conversationId - Conversation ID
+   * @returns Promise resolving to conversation state or null
    */
   static async getConversationState(
     conversationId: string
@@ -541,6 +564,8 @@ export class SupabaseService {
 
   /**
    * Generate human-readable refund reason
+   * @param summary - Deduction summary
+   * @returns Human-readable refund reason string
    */
   private static generateRefundReason(summary: DeductionSummary): string {
     if (summary.isBelowThreshold) {
@@ -554,6 +579,7 @@ export class SupabaseService {
 
   /**
    * Get tax-free thresholds by year
+   * @returns Record mapping year to threshold amount
    */
   static getTaxFreeThresholds(): Record<number, number> {
     return {
@@ -568,6 +594,9 @@ export class SupabaseService {
 
   /**
    * Check if income is below tax-free threshold
+   * @param income - Taxable income amount
+   * @param year - Tax year
+   * @returns Boolean indicating if income is below threshold
    */
   static isBelowThreshold(income: number, year: number): boolean {
     const thresholds = this.getTaxFreeThresholds();
@@ -577,6 +606,9 @@ export class SupabaseService {
 
   /**
    * Calculate progressive German tax brackets
+   * @param taxableIncome - Taxable income amount
+   * @param year - Tax year
+   * @returns Calculated tax amount
    */
   static calculateGermanTax(taxableIncome: number, year: number): number {
     // German progressive tax calculation
@@ -600,6 +632,8 @@ export class SupabaseService {
 
   /**
    * Calculate solidarity surcharge (5.5% of income tax)
+   * @param incomeTax - Income tax amount
+   * @returns Solidarity surcharge amount
    */
   static calculateSolidaritySurcharge(incomeTax: number): number {
     return incomeTax * 0.055;

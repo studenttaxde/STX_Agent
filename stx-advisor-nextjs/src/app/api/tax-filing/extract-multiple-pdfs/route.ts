@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { GermanTaxFields, MultiPDFExtractionResponse, TaxSummary, PDFExtractionResult } from '@/types';
-import { config } from '@/lib/config';
+import { config } from '@/utils/config';
 
 const PDF_EXTRACTOR_URL = process.env.PDF_EXTRACTOR_URL || config.backendUrl;
 

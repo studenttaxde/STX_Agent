@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { parseLohnsteuerbescheinigung, type ExtractedFields } from '@/lib/pdfParser'
-import { PflegedAgent } from '@/lib/taxAdvisorAgent'
+import { parseLohnsteuerbescheinigung, type ExtractedFields } from '@/utils/pdfParser'
+import { PflegedAgent } from '@/agent/taxAdvisorAgent'
 
 interface DeductionItem {
   category: string

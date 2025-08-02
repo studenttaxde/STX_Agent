@@ -1,18 +1,18 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { config } from '@/lib/config'
+import { config } from '@/utils/config'
 import { TaxAdvisorState, UserData, MultiPDFData } from '@/types'
 import { 
+  getSuggestedDeductions, 
   getUserProfile, 
   saveTaxFiling, 
   getTaxFilings, 
   getTaxFilingByYear, 
-  hasExistingData,
-  getSuggestedDeductions 
-} from '@/lib/supabaseService'
+  hasExistingData 
+} from '@/services/supabaseService'
 import Tabs from '@/components/Tabs'
-import AutopilotFlow from './autopilot/page'
+import AutopilotFlow from '@/features/autopilot/page'
 
 // Parse German number format (e.g., "1.713,00" -> 1713.00)
 const parseGermanNumber = (value: string): number => {
