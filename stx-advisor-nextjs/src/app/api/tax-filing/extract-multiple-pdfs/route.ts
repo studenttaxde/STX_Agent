@@ -296,7 +296,7 @@ Respond ONLY with a valid JSON object containing these fields. Use null for miss
                 text: extractorResult.text,
                 page_count: extractorResult.page_count,
                 character_count: extractorResult.character_count,
-                error: `OpenAI processing failed: ${errorMessage}`
+                error: 'OpenAI extraction failed'
               });
               failedFiles++;
             }
