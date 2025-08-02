@@ -688,7 +688,7 @@ Your core responsibilities:
 **Current Session Context:**
 - Conversation ID: ${this.state.conversationId}
 - User ID: ${this.state.userId || 'Not set'}
-- Extracted Data: ${this.state.extractedData ? JSON.stringify(this.state.extractedData) : 'Not available'}
+- Extracted Data: ${this.state.extractedData ? 'Available' : 'Not available'}
 - Questions Answered: ${this.state.currentQuestionIndex}
 - Deduction Flow: ${this.state.deductionFlow ? this.state.deductionFlow.status : 'Not set'}
 - Current Step: ${this.state.step}
@@ -716,20 +716,25 @@ Your core responsibilities:
   }
 
   async initialize() {
-    const tools = this.createTools();
-    const prompt = this.createPrompt();
+    try {
+      const tools = this.createTools();
+      const prompt = this.createPrompt();
 
-    const agent = await createReactAgent({
-      llm: this.llm,
-      tools: tools as any, // Type assertion to fix linter error
-      prompt
-    });
+      const agent = await createReactAgent({
+        llm: this.llm,
+        tools: tools as any, // Type assertion to fix linter error
+        prompt
+      });
 
-    this.agentExecutor = new AgentExecutor({
-      agent,
-      tools: tools as any, // Type assertion to fix linter error
-      verbose: true
-    });
+      this.agentExecutor = new AgentExecutor({
+        agent,
+        tools: tools as any, // Type assertion to fix linter error
+        verbose: true
+      });
+    } catch (error) {
+      console.error('Agent initialization error:', error);
+      throw new Error(`Failed to initialize Pfleged agent: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   }
 
   async runAgent(input: string): Promise<string> {
