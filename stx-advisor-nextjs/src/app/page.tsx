@@ -167,7 +167,9 @@ function AdvisorChat() {
       while (retryCount <= maxRetries) {
         try {
           setProcessingStatus(`Processing ${files.length} documents... (attempt ${retryCount + 1}/${maxRetries + 1})`)
-          response = await fetch('/api/tax-filing/extract-multiple-pdfs', {
+          // Use config.backendUrl as fallback if NEXT_PUBLIC_BACKEND_URL is not set
+          const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || config.backendUrl
+          response = await fetch(`${backendUrl}/extract`, {
             method: 'POST',
             body: formData
           })
