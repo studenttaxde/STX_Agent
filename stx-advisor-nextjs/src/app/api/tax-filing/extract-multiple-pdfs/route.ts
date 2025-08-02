@@ -27,9 +27,9 @@ export async function POST(request: NextRequest) {
 
     // Check file sizes to prevent timeouts
     for (const file of files) {
-      if (file.size > 5 * 1024 * 1024) { // 5MB limit
+      if (file.size > 3 * 1024 * 1024) { // 3MB limit for faster processing
         return NextResponse.json({ 
-          error: `File ${file.name} is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum file size is 5MB to prevent timeouts.` 
+          error: `File ${file.name} is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum file size is 3MB to prevent timeouts.` 
         }, { status: 400 });
       }
     }
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
 
     // Add timeout for PDF extraction service call
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000); // 4 seconds for PDF extraction
+    const timeoutId = setTimeout(() => controller.abort(), 6000); // 6 seconds for PDF extraction
 
     try {
       const extractorResponse = await fetch(`${PDF_EXTRACTOR_URL}/extract`, {
@@ -173,7 +173,7 @@ export async function POST(request: NextRequest) {
         try {
           // Process with OpenAI to extract German tax fields (with timeout)
           const openaiController = new AbortController();
-          const openaiTimeoutId = setTimeout(() => openaiController.abort(), 3000); // 3 seconds per file
+          const openaiTimeoutId = setTimeout(() => openaiController.abort(), 4000); // 4 seconds per file
 
           try {
             console.log(`[OpenAI] Processing ${extractorResult.fileName} with ${extractorResult.text.length} characters`);
@@ -359,7 +359,7 @@ Respond ONLY with a valid JSON object containing these fields. Use null for miss
       
       if (fetchError instanceof Error && fetchError.name === 'AbortError') {
         return NextResponse.json({ 
-          error: 'PDF extraction service timeout. Please try with fewer or smaller files (max 2 files, under 5MB each).' 
+          error: 'PDF extraction service timeout. Please try with fewer or smaller files (max 2 files, under 3MB each).' 
         }, { status: 504 });
       }
       
