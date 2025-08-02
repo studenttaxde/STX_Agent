@@ -328,7 +328,7 @@ function AdvisorChat() {
           summary: {
             year: safeYear,
             grossIncome: aggregatedData.totalIncome,
-            incomeTaxPaid: 0,
+            incomeTaxPaid: aggregatedData.lohnsteuer || 0,
             employer: aggregatedData.employers[0] || 'Unknown',
             fullName: 'User'
           }
@@ -353,6 +353,8 @@ function AdvisorChat() {
           documents: aggregatedData.documents,
           lohnsteuer: aggregatedData.lohnsteuer || 0
         }
+
+        console.log('Sending advisor data:', advisorData)
 
         const advisorResponse = await fetch('/api/advisor', {
           method: 'POST',
