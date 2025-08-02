@@ -236,8 +236,8 @@ function AdvisorChat() {
         const resultData = result.metadata || {}
         console.log(`Processing result for ${result.fileName}:`, resultData)
 
-        // Aggregate income - check multiple possible field names
-        const income = resultData.bruttolohn || resultData.bruttoarbeitslohn || resultData.gross_income || 0
+        // Aggregate income - use direct field
+        const income = resultData.bruttolohn || 0
         if (income && income !== 0) {
           const parsedIncome = parseFloat(income) || 0
           aggregatedData.totalIncome += parsedIncome
@@ -245,7 +245,7 @@ function AdvisorChat() {
         }
 
         // Aggregate Lohnsteuer (income tax paid)
-        const lohnsteuer = resultData.lohnsteuer || resultData.income_tax_paid || 0
+        const lohnsteuer = resultData.lohnsteuer || 0
         if (lohnsteuer && lohnsteuer !== 0) {
           const parsedLohnsteuer = parseFloat(lohnsteuer) || 0
           aggregatedData.lohnsteuer += parsedLohnsteuer
