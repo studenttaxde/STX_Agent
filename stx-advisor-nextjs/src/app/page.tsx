@@ -602,6 +602,35 @@ function AdvisorChat() {
 
           {state.step === 'advisor' && (
             <div className="flex flex-col h-[calc(100vh-300px)] min-h-[500px]">
+              {/* Tax Summary Card - Show real data from extractedData */}
+              {state.extractedData && (
+                <div className="mb-4 p-4 bg-white rounded-lg shadow border">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">📊 Tax Filing Summary</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-blue-50 p-3 rounded">
+                      <p className="text-sm text-blue-600 font-medium">Gross Income</p>
+                      <p className="text-xl font-bold text-blue-900">
+                        €{formatCurrency(state.extractedData.gross_income || 0)}
+                      </p>
+                    </div>
+                    <div className="bg-red-50 p-3 rounded">
+                      <p className="text-sm text-red-600 font-medium">Tax Paid</p>
+                      <p className="text-xl font-bold text-red-900">
+                        €{formatCurrency(state.extractedData.income_tax_paid || 0)}
+                      </p>
+                    </div>
+                  </div>
+                  {state.extractedData.solidaritaetszuschlag && (
+                    <div className="mt-3 bg-yellow-50 p-3 rounded">
+                      <p className="text-sm text-yellow-600 font-medium">Solidarity Tax</p>
+                      <p className="text-lg font-bold text-yellow-900">
+                        €{formatCurrency(state.extractedData.solidaritaetszuschlag)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+              
               <div className="flex-1 overflow-y-auto space-y-4 mb-4 p-4" ref={chatContainerRef}>
                 {state.messages.map((message, index) => (
                   <div
