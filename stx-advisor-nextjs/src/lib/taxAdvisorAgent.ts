@@ -32,12 +32,14 @@ export interface PflegedAgentState {
   messages: Array<{ sender: 'user' | 'assistant'; text: string; timestamp: Date }>;
   step: 'upload' | 'extract' | 'confirm' | 'questions' | 'calculate' | 'summary';
   done: boolean;
+  hasInteracted: boolean; // Added for initial analysis check
 }
 
 export class PflegedAgent {
   private llm: ChatOpenAI;
   private agentExecutor: AgentExecutor | null = null;
   private state: PflegedAgentState;
+  private agent!: AgentExecutor; // Use definite assignment assertion
 
   // Tax-free thresholds by year
   private static readonly TAX_FREE_THRESHOLDS: Record<number, number> = {
@@ -205,7 +207,8 @@ export class PflegedAgent {
       isComplete: false,
       messages: [],
       step: 'upload',
-      done: false
+      done: false,
+      hasInteracted: false // Initialize hasInteracted
     };
   }
 
@@ -475,7 +478,8 @@ export class PflegedAgent {
               isComplete: false,
               messages: [],
               step: 'upload',
-              done: false
+              done: false,
+              hasInteracted: false // Reset hasInteracted
             };
 
             return JSON.stringify({
@@ -680,7 +684,7 @@ Your core responsibilities:
         prompt
       });
 
-      this.agentExecutor = new AgentExecutor({
+      this.agent = new AgentExecutor({
         agent,
         tools: tools as any, // Type assertion to fix linter error
         verbose: true
@@ -692,69 +696,58 @@ Your core responsibilities:
   }
 
   async runAgent(input: string): Promise<string> {
-    if (!this.agentExecutor) {
-      await this.initialize();
-    }
-
     try {
-      // Add user message to state
-      this.state.messages.push({
-        sender: 'user',
-        text: input,
-        timestamp: new Date()
-      });
-
-      console.log('Running agent with input:', input);
-      console.log('Agent state before execution:', {
-        extractedData: this.state.extractedData ? 'Available' : 'Not available',
-        messagesCount: this.state.messages.length,
-        step: this.state.step
-      });
-
-      // For initial analysis, use a more direct approach
-      if (input.toLowerCase().includes('analyze') || input.toLowerCase().includes('initial')) {
-        console.log('Using direct analysis approach');
+      console.log('Agent runAgent called with input:', input);
+      console.log('Current state:', this.state);
+      
+      // If this is the first interaction and we have extracted data, do initial analysis
+      if (!this.state.hasInteracted && this.state.extractedData) {
+        this.state.hasInteracted = true;
         return this.handleInitialAnalysis();
       }
 
-      // Run agent with explicit tool usage guidance
-      const enhancedInput = `${input}
+      // If we have a deduction flow and are in questions mode, use AI to handle responses
+      if (this.state.deductionFlow && this.state.step === 'questions') {
+        return this.handleAIDeductionConversation(input);
+      }
 
-IMPORTANT: Use the available tools to help the user. If they're asking about tax data, use analyzeExtractedData. If they're asking about calculations, use calculateTaxSummary. If they're asking about deductions, use askDeductionQuestions. Always provide helpful, professional German tax advice.`;
-
-      console.log('Enhanced input for agent:', enhancedInput);
-
-      const result = await this.agentExecutor!.invoke({
-        input: enhancedInput
+      // For all other cases, use the AI agent
+      const result = await this.agent.invoke({
+        input: input,
+        state: this.state
       });
 
-      console.log('Agent execution result:', result);
+      console.log('Agent result:', result);
+      
+      // Update state based on AI response
+      if (result.output) {
+        // Check if AI wants to start deduction flow
+        if (result.output.toLowerCase().includes('deduction') || 
+            result.output.toLowerCase().includes('expense') ||
+            result.output.toLowerCase().includes('question')) {
+          this.state.step = 'questions';
+        }
+        
+        // Check if AI completed the process
+        if (result.output.toLowerCase().includes('summary') || 
+            result.output.toLowerCase().includes('complete') ||
+            result.output.toLowerCase().includes('refund')) {
+          this.state.step = 'summary';
+          this.state.isComplete = true;
+        }
+      }
 
-      // Add agent response to state
-      this.state.messages.push({
-        sender: 'assistant',
-        text: result.output,
-        timestamp: new Date()
-      });
-
-      return result.output;
+      return result.output || "I'm here to help with your German tax filing. How can I assist you?";
+      
     } catch (error) {
       console.error('Agent execution error:', error);
-      console.error('Error details:', {
-        name: error instanceof Error ? error.name : 'Unknown',
-        message: error instanceof Error ? error.message : 'Unknown error',
-        stack: error instanceof Error ? error.stack : 'No stack'
-      });
       
-      // Log error to console instead of Supabase
-      console.error('Agent execution failed:', error instanceof Error ? error.message : 'Unknown error');
-
-      // Provide a more helpful fallback response based on the input
-      if (input.toLowerCase().includes('analyze') || input.toLowerCase().includes('initial')) {
-        return this.handleInitialAnalysis();
-      } else {
-        return this.handleConversationFallback(input);
+      // Only fall back to predefined flow if AI completely fails
+      if (!this.state.extractedData) {
+        return "I don't have your tax data yet. Please upload your tax documents first.";
       }
+      
+      return this.handleConversationFallback(input);
     }
   }
 
@@ -1136,7 +1129,8 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
       isComplete: false,
       messages: [],
       step: 'upload',
-      done: false
+      done: false,
+      hasInteracted: false // Reset hasInteracted
     };
   }
 
@@ -1152,9 +1146,91 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
       isComplete: false,
       messages: [],
       step: 'upload',
-      done: false
+      done: false,
+      hasInteracted: false // Reset hasInteracted
     };
     
     console.log('State reset for new year. Conversation ID preserved:', conversationId);
+  }
+
+  private async handleAIDeductionConversation(input: string): Promise<string> {
+    try {
+      // Use AI to analyze the user's response and determine next action
+      const aiPrompt = `You are a German tax advisor helping with deduction questions. 
+      
+Current context:
+- User status: ${this.state.deductionFlow?.status || 'unknown'}
+- Current question index: ${this.state.currentQuestionIndex}
+- Total questions: ${this.state.deductionFlow?.questions.length || 0}
+- User's response: "${input}"
+
+Analyze the user's response and:
+1. If they provided an amount (like "3200" or "yes 100"), extract the amount and confirm
+2. If they said "no", acknowledge and move to next question
+3. If they asked for clarification, provide helpful explanation
+4. If they want to skip or have concerns, address them naturally
+
+Respond in a conversational, helpful manner. Don't just ask the next question - engage with their response first.`;
+
+      const result = await this.agent.invoke({
+        input: aiPrompt,
+        state: this.state
+      });
+
+      // Process the AI response and update state
+      const response = result.output || "";
+      
+      // Extract amount if user provided one
+      const amountMatch = input.match(/(\d+(?:[.,]\d+)?)/);
+      if (amountMatch) {
+        const amount = parseFloat(amountMatch[1].replace(',', '.'));
+        const currentQuestion = this.state.deductionFlow?.questions[this.state.currentQuestionIndex];
+        if (currentQuestion) {
+          this.state.deductionAnswers[currentQuestion.id] = {
+            questionId: currentQuestion.id,
+            answer: true,
+            amount: amount,
+            details: `Claimed: €${amount.toLocaleString('de-DE', { minimumFractionDigits: 2 })}`
+          };
+        }
+      } else if (input.toLowerCase().includes('no')) {
+        const currentQuestion = this.state.deductionFlow?.questions[this.state.currentQuestionIndex];
+        if (currentQuestion) {
+          this.state.deductionAnswers[currentQuestion.id] = {
+            questionId: currentQuestion.id,
+            answer: false,
+            amount: 0,
+            details: 'No expense claimed'
+          };
+        }
+      }
+
+      // Move to next question if we processed an answer
+      if (amountMatch || input.toLowerCase().includes('no')) {
+        this.state.currentQuestionIndex++;
+        
+        // Check if we have more questions
+        if (this.state.currentQuestionIndex < (this.state.deductionFlow?.questions.length || 0)) {
+          const nextQuestion = this.state.deductionFlow?.questions[this.state.currentQuestionIndex];
+          return `${response}
+
+**Next Question:**
+${nextQuestion?.question}
+
+Please answer with the amount in euros, or "no" if you don't have this expense.`;
+        } else {
+          // All questions answered, generate summary
+          return `${response}
+
+${this.generateFinalSummary()}`;
+        }
+      }
+
+      return response;
+      
+    } catch (error) {
+      console.error('AI deduction conversation error:', error);
+      return this.handleConversationFallback(input);
+    }
   }
 } 
