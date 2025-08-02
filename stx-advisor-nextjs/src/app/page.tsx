@@ -409,16 +409,32 @@ function AdvisorChat() {
           console.log('Advisor initialized successfully')
           console.log('Advisor response data:', advisorResponseData)
           
-          // Add the advisor's initial message
-          setState(prev => ({
-            ...prev,
-            messages: [
-              {
-                sender: 'assistant',
-                text: advisorResponseData.message
-              }
-            ]
-          }))
+                  // Add success message with extracted data
+        const successMessage = `✅ Successfully processed ${successfulResults.length} document(s)!
+
+📊 **Extracted Tax Data:**
+• Total Income: €${(aggregatedData.totalIncome / 100).toFixed(2)}
+• Income Tax Paid: €${(aggregatedData.lohnsteuer / 100).toFixed(2)}
+• Solidarity Tax: €${(aggregatedData.solidaritaetszuschlag / 100).toFixed(2)}
+• Employers: ${aggregatedData.employers.join(', ') || 'Not specified'}
+• Year: ${safeYear}
+
+I'm ready to help you with your tax filing! What would you like to know?`
+
+        // Add the success message and advisor's response
+        setState(prev => ({
+          ...prev,
+          messages: [
+            {
+              sender: 'assistant',
+              text: successMessage
+            },
+            {
+              sender: 'assistant',
+              text: advisorResponseData.message
+            }
+          ]
+        }))
         } else {
           console.error('Advisor initialization failed:', await advisorResponse.text())
         }
