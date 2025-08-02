@@ -22,9 +22,9 @@ export async function POST(request: NextRequest) {
       extractorFormData.append('files', file);
     });
 
-    console.log(`Calling PDF extraction service at: ${PDF_EXTRACTOR_URL}/extract-multiple`);
+    console.log(`Calling PDF extraction service at: ${PDF_EXTRACTOR_URL}/extract`);
 
-    const extractorResponse = await fetch(`${PDF_EXTRACTOR_URL}/extract-multiple`, {
+    const extractorResponse = await fetch(`${PDF_EXTRACTOR_URL}/extract`, {
       method: 'POST',
       body: extractorFormData,
     });
@@ -42,6 +42,20 @@ export async function POST(request: NextRequest) {
 
     const extractorData = await extractorResponse.json();
     console.log(`PDF extraction service returned:`, extractorData);
+
+    // Validate response format
+    if (!extractorData.success) {
+      return NextResponse.json({ 
+        error: 'PDF extraction service failed', 
+        details: extractorData.error || 'Unknown error'
+      }, { status: 500 });
+    }
+
+    if (!extractorData.results || !Array.isArray(extractorData.results)) {
+      return NextResponse.json({ 
+        error: 'Invalid response format from PDF extraction service'
+      }, { status: 500 });
+    }
 
     // Process each extracted text with OpenAI
     const openaiApiKey = process.env.OPENAI_API_KEY;
@@ -61,14 +75,14 @@ export async function POST(request: NextRequest) {
     const timePeriods: Array<{ filename: string; from: string; to: string }> = [];
 
     for (const extractorResult of extractorData.results) {
-      if (!extractorResult.success) {
+      if (extractorResult.status !== 'success') {
         results.push({
           success: false,
-          filename: extractorResult.filename,
+          filename: extractorResult.fileName,
           text: '',
           page_count: 0,
           character_count: 0,
-          error: extractorResult.error
+          error: extractorResult.error || 'Extraction failed'
         });
         failedFiles++;
         continue;
@@ -106,7 +120,7 @@ Respond ONLY with a valid JSON object containing these fields. Use null for miss
         });
 
         const content = response.choices[0].message?.content || '';
-        console.log(`[OpenAI raw response for ${extractorResult.filename}]`, content);
+        console.log(`[OpenAI raw response for ${extractorResult.fileName}]`, content);
 
         // Clean up the response and parse JSON
         const contentClean = content

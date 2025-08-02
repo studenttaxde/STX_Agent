@@ -113,14 +113,14 @@ async function tryBackendExtraction(file: File) {
       console.warn('Health check failed, proceeding anyway:', healthError)
     }
     
-    const response = await fetch(`${config.backendUrl}/extract-text`, {
+    const response = await fetch(`${config.backendUrl}/extract`, {
       method: 'POST',
       body: formDataToSend,
       signal: controller.signal,
       headers: {
         'Accept': 'application/json',
       }
-    })
+    });
 
     clearTimeout(timeoutId)
 
@@ -137,6 +137,22 @@ async function tryBackendExtraction(file: File) {
       throw new Error(data.error || 'PDF extraction failed')
     }
 
+    // Handle unified response format
+    if (data.results && data.results.length > 0) {
+      const result = data.results[0] // Single file extraction
+      if (result.status === 'success') {
+        return {
+          filename: file.name,
+          success: true,
+          data: result.text,
+          metadata: result.metadata || {}
+        }
+      } else {
+        throw new Error(result.error || 'PDF extraction failed')
+      }
+    }
+
+    // Fallback for old format
     return {
       filename: file.name,
       success: true,
