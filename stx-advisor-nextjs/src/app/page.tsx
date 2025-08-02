@@ -134,7 +134,7 @@ function AdvisorChat() {
       while (retryCount <= maxRetries) {
         try {
           setProcessingStatus(`Processing ${files.length} documents... (attempt ${retryCount + 1}/${maxRetries + 1})`)
-          response = await fetch('/api/extract-pdfs', {
+          response = await fetch('/api/extract-multiple-pdfs', {
             method: 'POST',
             body: formData
           })
