@@ -33,6 +33,22 @@ export interface PflegedAgentState {
   step: 'upload' | 'extract' | 'confirm' | 'questions' | 'calculate' | 'summary';
   done: boolean;
   hasInteracted: boolean; // Added for initial analysis check
+  
+  // New properties for autonomous tool chaining
+  latestSummary?: string;
+  refundEstimate?: number;
+  thresholdCheckResult?: {
+    isBelowThreshold: boolean;
+    threshold: number;
+    taxableIncome: number;
+  };
+  debugLog: Array<{
+    tool: string;
+    timestamp: Date;
+    input?: any;
+    output?: any;
+  }>;
+  hasRunToolChain: boolean;
 }
 
 export class PflegedAgent {
@@ -208,7 +224,9 @@ export class PflegedAgent {
       messages: [],
       step: 'upload',
       done: false,
-      hasInteracted: false // Initialize hasInteracted
+      hasInteracted: false, // Initialize hasInteracted
+      debugLog: [], // Initialize debugLog
+      hasRunToolChain: false // Initialize hasRunToolChain
     };
   }
 
@@ -230,10 +248,27 @@ export class PflegedAgent {
             this.state.extractedData = data;
             this.state.step = 'extract';
             
+            // Log tool usage
+            this.state.debugLog.push({
+              tool: 'analyzeExtractedData',
+              timestamp: new Date(),
+              input: input,
+              output: { dataKeys: Object.keys(data) }
+            });
+            
+            // Check if we have enough data for autonomous analysis
+            const hasBasicData = data.gross_income && data.income_tax_paid && data.year;
+            
+            if (hasBasicData) {
+              // Trigger autonomous tool chain in next interaction
+              this.state.hasRunToolChain = false;
+            }
+            
             return JSON.stringify({
               success: true,
               data: data,
-              message: 'Tax data analyzed successfully'
+              message: 'Tax data analyzed successfully',
+              hasBasicData: hasBasicData
             });
           } catch (error) {
             return JSON.stringify({
@@ -289,6 +324,15 @@ export class PflegedAgent {
 
             this.state.taxCalculation = summary;
             this.state.step = 'calculate';
+            this.state.refundEstimate = refund;
+            
+            // Log tool usage
+            this.state.debugLog.push({
+              tool: 'calculateTaxSummary',
+              timestamp: new Date(),
+              input: input,
+              output: summary
+            });
             
             return JSON.stringify({
               success: true,
@@ -298,7 +342,52 @@ export class PflegedAgent {
           } catch (error) {
             return JSON.stringify({
               success: false,
-              error: error instanceof Error ? error.message : 'Calculation failed'
+              error: error instanceof Error ? error.message : 'Unknown error'
+            });
+          }
+        }
+      }),
+
+      new DynamicStructuredTool({
+        name: 'checkTaxThreshold',
+        description: 'Check if taxable income is below the tax-free threshold',
+        schema: z.object({
+          taxableIncome: z.number().describe('Taxable income in euros'),
+          year: z.number().optional().describe('Tax year for threshold lookup')
+        }),
+        func: async (input) => {
+          try {
+            const year = input.year || this.state.extractedData?.year || 2021;
+            const threshold = PflegedAgent.TAX_FREE_THRESHOLDS[year] || 10908;
+            const isBelowThreshold = input.taxableIncome <= threshold;
+            
+            this.state.thresholdCheckResult = {
+              isBelowThreshold,
+              threshold,
+              taxableIncome: input.taxableIncome
+            };
+            
+            // Log tool usage
+            this.state.debugLog.push({
+              tool: 'checkTaxThreshold',
+              timestamp: new Date(),
+              input: input,
+              output: { isBelowThreshold, threshold, taxableIncome: input.taxableIncome }
+            });
+            
+            return JSON.stringify({
+              success: true,
+              isBelowThreshold,
+              threshold,
+              taxableIncome: input.taxableIncome,
+              message: isBelowThreshold ? 
+                `Income below threshold - eligible for full refund` : 
+                `Income above threshold - partial refund possible`
+            });
+          } catch (error) {
+            return JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : 'Unknown error'
             });
           }
         }
@@ -306,29 +395,125 @@ export class PflegedAgent {
 
       new DynamicStructuredTool({
         name: 'askDeductionQuestions',
-        description: 'Ask relevant deduction questions based on user status',
+        description: 'Start deduction question flow based on user status',
         schema: z.object({
-          status: z.enum(['bachelor', 'master', 'new_employee', 'full_time']).describe('User status'),
-          currentQuestion: z.number().describe('Current question index')
+          status: z.enum(['bachelor', 'master', 'new_employee', 'full_time']).describe('User status for deduction flow')
         }),
         func: async (input) => {
           try {
-            this.state.deductionFlow = this.deductionFlowMap[input.status];
-            this.state.currentQuestionIndex = input.currentQuestion;
+            const status = input.status as UserStatus;
+            this.state.deductionFlow = this.deductionFlowMap[status];
             this.state.step = 'questions';
-
-            const currentQuestion = this.state.deductionFlow.questions[input.currentQuestion];
+            this.state.currentQuestionIndex = 0;
+            
+            // Log tool usage
+            this.state.debugLog.push({
+              tool: 'askDeductionQuestions',
+              timestamp: new Date(),
+              input: input,
+              output: { status, questionCount: this.state.deductionFlow?.questions.length || 0 }
+            });
             
             return JSON.stringify({
               success: true,
-              question: currentQuestion,
-              progress: `${input.currentQuestion + 1}/${this.state.deductionFlow.questions.length}`,
-              message: `Question ${input.currentQuestion + 1} of ${this.state.deductionFlow.questions.length}`
+              status: status,
+              questionCount: this.state.deductionFlow?.questions.length || 0,
+              message: `Started deduction questions for ${status} status`
             });
           } catch (error) {
             return JSON.stringify({
               success: false,
-              error: error instanceof Error ? error.message : 'Failed to get question'
+              error: error instanceof Error ? error.message : 'Unknown error'
+            });
+          }
+        }
+      }),
+
+      new DynamicStructuredTool({
+        name: 'runToolChain',
+        description: 'Automatically run a chain of tools to analyze tax data and provide comprehensive results',
+        schema: z.object({
+          forceRun: z.boolean().optional().describe('Force run even if already executed')
+        }),
+        func: async (input) => {
+          try {
+            // Don't run if already executed unless forced
+            if (this.state.hasRunToolChain && !input.forceRun) {
+              return JSON.stringify({
+                success: true,
+                message: 'Tool chain already executed',
+                cached: true
+              });
+            }
+
+            if (!this.state.extractedData) {
+              return JSON.stringify({
+                success: false,
+                error: 'No extracted data available for tool chain'
+              });
+            }
+
+            const { gross_income, income_tax_paid, year } = this.state.extractedData;
+            
+            // Step 1: Calculate tax summary
+            const totalDeductions = Object.values(this.state.deductionAnswers)
+              .filter(a => a.answer)
+              .reduce((sum, a) => sum + (a.amount || 0), 0);
+            
+            const taxableIncome = Math.max(0, (gross_income || 0) - totalDeductions);
+            const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 10908;
+            
+            // Step 2: Check threshold
+            const isBelowThreshold = taxableIncome <= threshold;
+            
+            // Step 3: Calculate refund
+            let refund = 0;
+            if (isBelowThreshold) {
+              refund = income_tax_paid || 0; // Full refund when below threshold
+            } else {
+              const estimatedTax = this.calculateGermanTax(taxableIncome, year);
+              refund = Math.max(0, (income_tax_paid || 0) - estimatedTax);
+            }
+
+            // Step 4: Generate final summary
+            const finalSummary = this.generateFinalSummary();
+            
+            // Update state
+            this.state.latestSummary = finalSummary;
+            this.state.refundEstimate = refund;
+            this.state.thresholdCheckResult = {
+              isBelowThreshold,
+              threshold,
+              taxableIncome
+            };
+            this.state.hasRunToolChain = true;
+            this.state.step = 'summary';
+            
+            // Log tool chain execution
+            this.state.debugLog.push({
+              tool: 'runToolChain',
+              timestamp: new Date(),
+              input: input,
+              output: {
+                taxableIncome,
+                isBelowThreshold,
+                refund,
+                summaryLength: finalSummary.length
+              }
+            });
+            
+            return JSON.stringify({
+              success: true,
+              taxableIncome,
+              isBelowThreshold,
+              refund,
+              summary: finalSummary,
+              message: 'Tool chain completed successfully'
+            });
+          } catch (error) {
+            return JSON.stringify({
+              success: false,
+              error: error instanceof Error ? error.message : 'Unknown error'
             });
           }
         }
@@ -479,7 +664,9 @@ export class PflegedAgent {
               messages: [],
               step: 'upload',
               done: false,
-              hasInteracted: false // Reset hasInteracted
+              hasInteracted: false, // Reset hasInteracted
+              debugLog: [], // Reset debugLog
+              hasRunToolChain: false // Reset hasRunToolChain
             };
 
             return JSON.stringify({
@@ -491,37 +678,6 @@ export class PflegedAgent {
             return JSON.stringify({
               success: false,
               error: error instanceof Error ? error.message : 'Failed to reset agent'
-            });
-          }
-        }
-      }),
-
-      new DynamicStructuredTool({
-        name: 'checkTaxThreshold',
-        description: 'Check if income is below tax-free threshold for the year',
-        schema: z.object({
-          income: z.number().describe('Gross income in euros'),
-          year: z.number().describe('Tax year')
-        }),
-        func: async (input) => {
-          try {
-            const threshold = PflegedAgent.TAX_FREE_THRESHOLDS[input.year];
-            const isBelow = threshold !== undefined && input.income < threshold;
-            
-            return JSON.stringify({
-              success: true,
-              isBelowThreshold: isBelow,
-              threshold: threshold,
-              income: input.income,
-              year: input.year,
-              message: isBelow 
-                ? `Income (€${input.income}) is below threshold (€${threshold}) - full refund applies`
-                : `Income (€${input.income}) is above threshold (€${threshold}) - partial refund calculation needed`
-            });
-          } catch (error) {
-            return JSON.stringify({
-              success: false,
-              error: error instanceof Error ? error.message : 'Failed to check threshold'
             });
           }
         }
@@ -711,6 +867,26 @@ Your core responsibilities:
         return this.handleAIDeductionConversation(input);
       }
 
+      // Autonomous tool chaining logic
+      if (this.state.extractedData && !this.state.hasRunToolChain) {
+        console.log('Running autonomous tool chain...');
+        
+        // Check if we have enough data for comprehensive analysis
+        const hasBasicData = this.state.extractedData.gross_income && 
+                           this.state.extractedData.income_tax_paid && 
+                           this.state.extractedData.year;
+        
+        if (hasBasicData) {
+          // Run the complete tool chain
+          const toolChainResult = await this.runAutonomousToolChain();
+          
+          // If tool chain completed successfully, return the summary
+          if (toolChainResult.success) {
+            return toolChainResult.summary || "Analysis completed. How can I help you further?";
+          }
+        }
+      }
+
       // For all other cases, use the AI agent
       const result = await this.agent.invoke({
         input: input,
@@ -748,6 +924,34 @@ Your core responsibilities:
       }
       
       return this.handleConversationFallback(input);
+    }
+  }
+
+  private async runAutonomousToolChain(): Promise<{ success: boolean; summary?: string }> {
+    try {
+      // Use the runToolChain tool
+      const toolChainTool = this.createTools().find(tool => tool.name === 'runToolChain');
+      if (!toolChainTool) {
+        console.error('runToolChain tool not found');
+        return { success: false };
+      }
+
+      const result = await toolChainTool.func({ forceRun: false } as any);
+      const parsedResult = JSON.parse(result);
+      
+      if (parsedResult.success) {
+        console.log('Autonomous tool chain completed successfully');
+        return { 
+          success: true, 
+          summary: parsedResult.summary 
+        };
+      } else {
+        console.error('Tool chain failed:', parsedResult.error);
+        return { success: false };
+      }
+    } catch (error) {
+      console.error('Error running autonomous tool chain:', error);
+      return { success: false };
     }
   }
 
@@ -1175,7 +1379,9 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
       messages: [],
       step: 'upload',
       done: false,
-      hasInteracted: false // Reset hasInteracted
+      hasInteracted: false, // Reset hasInteracted
+      debugLog: [], // Reset debugLog
+      hasRunToolChain: false // Reset hasRunToolChain
     };
   }
 
@@ -1192,7 +1398,9 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
       messages: [],
       step: 'upload',
       done: false,
-      hasInteracted: false // Reset hasInteracted
+      hasInteracted: false, // Reset hasInteracted
+      debugLog: [], // Reset debugLog
+      hasRunToolChain: false // Reset hasRunToolChain
     };
     
     console.log('State reset for new year. Conversation ID preserved:', conversationId);
