@@ -457,6 +457,7 @@ def extract_text_from_file(file_content: bytes, filename: str) -> dict:
         parsed_data = parse_with_llm(enhanced_text, filename)
         
         logger.info(f"Successfully extracted and enhanced text from {filename} ({page_count} pages, {len(enhanced_text)} characters)")
+        logger.info(f"Parsed data for {filename}: {parsed_data}")
         
         return {
             "success": True,
@@ -619,13 +620,20 @@ async def extract_pdfs(files: List[UploadFile] = File(...)):
                 
                 # Convert to unified response format
                 if result["success"]:
+                    # Extract parsed data fields and put them in metadata
+                    parsed_fields = ["bruttolohn", "lohnsteuer", "solidaritaetszuschlag", "employer", "name", "year", "steuerklasse", "beschaeftigungszeitraum"]
+                    metadata = {}
+                    for field in parsed_fields:
+                        if field in result:
+                            metadata[field] = result[field]
+                    
                     unified_result = {
                         "fileName": file.filename,
                         "text": result["text"],
                         "page_count": result["page_count"],
                         "character_count": result["character_count"],
                         "status": "success",
-                        "metadata": result.get("metadata", {})
+                        "metadata": metadata
                     }
                     successful_extractions += 1
                     total_pages += result["page_count"]
