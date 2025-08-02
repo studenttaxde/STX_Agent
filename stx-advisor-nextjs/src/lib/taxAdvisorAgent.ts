@@ -15,6 +15,20 @@ import {
   DeductionSummary,
   TaxAdvisorState
 } from '@/types';
+import { createClient } from '@supabase/supabase-js';
+
+// User Profile Interface
+export interface UserProfile {
+  id: string;
+  full_name?: string;
+  age?: number;
+  job_type?: 'employee' | 'freelancer' | 'student' | 'unemployed';
+  marital_status?: 'single' | 'married' | 'divorced' | 'widowed';
+  income_brackets?: 'low' | 'medium' | 'high';
+  known_deductions?: string[];
+  created_at?: string;
+  updated_at?: string;
+}
 
 export interface PflegedAgentState {
   conversationId: string;
@@ -49,6 +63,9 @@ export interface PflegedAgentState {
     output?: any;
   }>;
   hasRunToolChain: boolean;
+  
+  // User profile for personalized advice
+  userProfile?: UserProfile | null;
 }
 
 export class PflegedAgent {
@@ -56,15 +73,19 @@ export class PflegedAgent {
   private agentExecutor: AgentExecutor | null = null;
   private state: PflegedAgentState;
   private agent!: AgentExecutor; // Use definite assignment assertion
+  
+  // Supabase client for user profile data
+  private supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
 
   // Tax-free thresholds by year
   private static readonly TAX_FREE_THRESHOLDS: Record<number, number> = {
     2021: 9744,
     2022: 10347,
     2023: 10908,
-    2024: 10908,
-    2025: 11280,
-    2026: 11640
+    2024: 11604
   };
 
   // Enhanced deduction flows from taxAdvisor.ts
@@ -226,12 +247,33 @@ export class PflegedAgent {
       done: false,
       hasInteracted: false, // Initialize hasInteracted
       debugLog: [], // Initialize debugLog
-      hasRunToolChain: false // Initialize hasRunToolChain
+      hasRunToolChain: false, // Initialize hasRunToolChain
+      userProfile: null // Initialize userProfile
     };
   }
 
   private generateConversationId(): string {
     return `pfleged_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  async loadUserProfile(userId: string): Promise<UserProfile | null> {
+    try {
+      const { data, error } = await this.supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
+
+      if (error) {
+        console.error('Error loading user profile:', error);
+        return null;
+      }
+
+      return data as UserProfile;
+    } catch (error) {
+      console.error('Error loading user profile:', error);
+      return null;
+    }
   }
 
   private createTools() {
@@ -406,19 +448,37 @@ export class PflegedAgent {
             this.state.step = 'questions';
             this.state.currentQuestionIndex = 0;
             
+            // Personalize questions based on user profile
+            let personalizationNote = '';
+            if (this.state.userProfile) {
+              const profile = this.state.userProfile;
+              if (profile.job_type === 'freelancer') {
+                personalizationNote = '\n\n💼 **Freelancer Tip:** Since you\'re a freelancer, you may also be eligible for business-related deductions like home office, professional development, and business travel expenses.';
+              } else if (profile.marital_status === 'married') {
+                personalizationNote = '\n\n💑 **Married Filing:** Consider filing jointly with your spouse for potential tax benefits.';
+              } else if (profile.age && profile.age < 25) {
+                personalizationNote = '\n\n🎓 **Student Benefits:** As a young student, you may be eligible for additional education-related deductions.';
+              }
+            }
+            
             // Log tool usage
             this.state.debugLog.push({
               tool: 'askDeductionQuestions',
               timestamp: new Date(),
               input: input,
-              output: { status, questionCount: this.state.deductionFlow?.questions.length || 0 }
+              output: { 
+                status, 
+                questionCount: this.state.deductionFlow?.questions.length || 0,
+                userProfile: this.state.userProfile ? 'Available' : 'Not available'
+              }
             });
             
             return JSON.stringify({
               success: true,
               status: status,
               questionCount: this.state.deductionFlow?.questions.length || 0,
-              message: `Started deduction questions for ${status} status`
+              personalizationNote: personalizationNote,
+              message: `Started personalized deduction questions for ${status} status`
             });
           } catch (error) {
             return JSON.stringify({
@@ -776,54 +836,45 @@ export class PflegedAgent {
   }
 
   private createPrompt() {
+    // Build personalized context based on user profile
+    let personalizedContext = '';
+    if (this.state.userProfile) {
+      const profile = this.state.userProfile;
+      personalizedContext = `
+PERSONALIZED CONTEXT:
+- User: ${profile.full_name || 'Unknown'}
+- Age: ${profile.age || 'Unknown'}
+- Job Type: ${profile.job_type || 'Unknown'}
+- Marital Status: ${profile.marital_status || 'Unknown'}
+- Income Bracket: ${profile.income_brackets || 'Unknown'}
+- Known Deductions: ${profile.known_deductions?.join(', ') || 'None specified'}
+
+Provide advice tailored to this user's specific situation.`;
+    }
+
+    const systemPrompt = `You are Pfleged, an AI-powered German tax advisor specializing in helping students and young professionals with their tax filings.
+
+${personalizedContext}
+
+Your role is to:
+1. Analyze extracted tax data from uploaded documents
+2. Provide personalized tax advice based on the user's profile and situation
+3. Guide users through deduction questions relevant to their circumstances
+4. Calculate potential refunds and tax savings
+5. Generate comprehensive, professional summaries
+
+Available data: ${this.state.extractedData ? 'Available' : 'Not available'}
+
+Always provide helpful, accurate German tax advice. Be conversational but professional. Use the available tools to analyze data and provide insights.
+
+When asking questions, consider the user's profile:
+- For students: Focus on education expenses, books, travel
+- For freelancers: Emphasize business expenses, home office, professional development
+- For employees: Highlight work-related expenses, commuting, training
+- For married users: Mention joint filing benefits and spouse-related deductions`;
+
     return ChatPromptTemplate.fromMessages([
-      ['system', `You are Pfleged, an expert German tax advisor with deep knowledge of German tax law, deductions, and filing procedures. You guide users through their tax filing process with intelligence, empathy, and accuracy.
-
-Your core responsibilities:
-1. **Analyze extracted tax data** - Use analyzeExtractedData tool when user uploads documents
-2. **Provide intelligent insights** - Explain what you found and what it means for their tax situation
-3. **Guide through deductions** - Use askDeductionQuestions tool for personalized deduction questions
-4. **Calculate refunds** - Use calculateTaxSummary tool to determine refunds and estimates
-5. **Handle complex scenarios** - Use applyLossCarryforward tool for previous year losses
-6. **Maintain conversation flow** - Keep the conversation natural and helpful
-
-**Key German Tax Knowledge:**
-- Tax-free thresholds by year (2021: €9,744, 2022: €10,347, 2023: €10,908)
-- Common deductions: Werbungskosten, Sonderausgaben, Vorsorgeaufwendungen
-- Student deductions: Tuition fees, books, travel, work-related expenses
-- Employee deductions: Work tools, commuting, home office, professional development
-- Loss carryforward (Verlustvortrag) for students with previous losses
-
-**Conversation Style:**
-- Be professional but friendly
-- Explain complex tax concepts simply
-- Ask one question at a time
-- Provide clear next steps
-- Show empathy for tax filing stress
-- Use German tax terminology appropriately
-
-**IMPORTANT: Always use tools when appropriate:**
-- When user uploads documents → Use analyzeExtractedData
-- When user asks about calculations → Use calculateTaxSummary
-- When user needs deduction questions → Use askDeductionQuestions
-- When user has previous losses → Use applyLossCarryforward
-- When generating final summary → Use generateFinalSummary
-
-**Current Session Context:**
-- Conversation ID: ${this.state.conversationId}
-- User ID: ${this.state.userId || 'Not set'}
-- Extracted Data: ${this.state.extractedData ? 'Available' : 'Not available'}
-- Questions Answered: ${this.state.currentQuestionIndex}
-- Deduction Flow: ${this.state.deductionFlow ? this.state.deductionFlow.status : 'Not set'}
-- Current Step: ${this.state.step}
-- Conversation History: ${this.state.messages.length} messages
-
-**Always:**
-- Use tools for calculations and data operations
-- Provide accurate German tax advice
-- Be helpful, professional, and empathetic
-- Guide users step-by-step through their tax filing
-- Explain the reasoning behind your recommendations`],
+      ['system', systemPrompt],
       ['human', '{input}'],
       ['human', '{agent_scratchpad}']
     ]);
@@ -1199,6 +1250,28 @@ Please answer with the amount in euros, or "no" if you don't have this expense.`
       requiredDocs.push("Receipts for study materials");
     }
 
+    // Generate personalized advice based on user profile
+    let personalizedAdvice = '';
+    if (this.state.userProfile) {
+      const profile = this.state.userProfile;
+      
+      if (profile.job_type === 'freelancer') {
+        personalizedAdvice += '\n\n💼 **Freelancer-Specific Advice:**\n- Consider home office deductions for workspace expenses\n- Track all business-related travel and meals\n- Keep detailed records of professional development costs\n- Consider quarterly tax payments to avoid penalties';
+      }
+      
+      if (profile.marital_status === 'married') {
+        personalizedAdvice += '\n\n💑 **Married Filing Benefits:**\n- You may benefit from joint filing with your spouse\n- Consider income splitting strategies\n- Review spouse\'s income for joint deduction opportunities';
+      }
+      
+      if (profile.age && profile.age < 25) {
+        personalizedAdvice += '\n\n🎓 **Student-Specific Tips:**\n- You may be eligible for additional education credits\n- Consider claiming moving expenses if you relocated for studies\n- Review if you qualify for the "Ausbildungskosten" deduction';
+      }
+      
+      if (profile.income_brackets === 'low') {
+        personalizedAdvice += '\n\n💰 **Low Income Benefits:**\n- You may qualify for additional social benefits\n- Consider applying for "Arbeitslosengeld II" if applicable\n- Review eligibility for housing benefits';
+      }
+    }
+
     return `# 📊 **Tax Filing Summary**
 
 ## ✅ **Estimated Refund**
@@ -1216,7 +1289,7 @@ ${missingInfo.length > 0 ? missingInfo.map(item => `- ${item}`).join('\n') : '- 
 ${nextSteps.map(step => `- ${step}`).join('\n')}
 
 ## 📂 **Required Documents**
-${requiredDocs.map(doc => `- ${doc}`).join('\n')}
+${requiredDocs.map(doc => `- ${doc}`).join('\n')}${personalizedAdvice}
 
 ---
 *This summary is based on the information provided. For official filing, please consult with a tax professional.*`;
@@ -1278,6 +1351,48 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
 
   setUserId(userId: string) {
     this.state.userId = userId;
+    // Automatically load user profile when userId is set
+    this.loadUserProfile(userId).then(profile => {
+      this.state.userProfile = profile;
+      console.log('User profile loaded:', profile);
+    });
+  }
+
+  setUserProfile(profile: UserProfile) {
+    this.state.userProfile = profile;
+    console.log('User profile set:', profile);
+  }
+
+  async updateUserProfile(updates: Partial<UserProfile>): Promise<boolean> {
+    try {
+      if (!this.state.userId) {
+        console.error('No userId available for profile update');
+        return false;
+      }
+
+      const { data, error } = await this.supabase
+        .from('user_profiles')
+        .upsert({
+          id: this.state.userId,
+          ...updates,
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error updating user profile:', error);
+        return false;
+      }
+
+      // Update local state
+      this.state.userProfile = data as UserProfile;
+      console.log('User profile updated:', data);
+      return true;
+    } catch (error) {
+      console.error('Error updating user profile:', error);
+      return false;
+    }
   }
 
   addDeductionAnswer(questionId: string, answer: DeductionAnswer) {
