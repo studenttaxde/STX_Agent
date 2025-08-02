@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { config } from '@/lib/config'
 import { parseLohnsteuerbescheinigung } from '@/lib/pdfParser'
 
-export const maxDuration = 8 // Reduced from 10 to 8 seconds for Netlify
+export const maxDuration = 25 // Increased for Render service which may be slower
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,16 +22,16 @@ export async function POST(request: NextRequest) {
       console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`)
       
       try {
-        // Layer 1: Try backend extraction (3 seconds)
+        // Layer 1: Try backend extraction (15 seconds for Render)
         let result = await tryBackendExtraction(file)
         
-        // Layer 2: If backend fails, try local parsing (3 seconds)
+        // Layer 2: If backend fails, try local parsing (5 seconds)
         if (!result.success) {
           console.log(`Backend failed for ${file.name}, trying local parsing`)
           result = await tryLocalPDFParsing(file)
         }
         
-        // Layer 3: If local parsing fails, try basic text extraction (2 seconds)
+        // Layer 3: If local parsing fails, try basic text extraction (3 seconds)
         if (!result.success) {
           console.log(`Local parsing failed for ${file.name}, trying basic extraction`)
           result = await tryBasicTextExtraction(file)
@@ -71,7 +71,7 @@ async function tryBackendExtraction(file: File) {
   formDataToSend.append('file', file)
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 3000) // Reduced from 4 to 3 seconds
+  const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 seconds for Render service
 
   try {
     console.log(`Attempting backend extraction for ${file.name} to ${config.backendUrl}`)
@@ -113,7 +113,7 @@ async function tryBackendExtraction(file: File) {
 
 async function tryLocalPDFParsing(file: File) {
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 3000) // 3 second timeout
+  const timeoutId = setTimeout(() => controller.abort(), 5000) // 5 second timeout
 
   try {
     console.log(`Attempting local PDF parsing for ${file.name}`)
@@ -163,7 +163,7 @@ async function tryLocalPDFParsing(file: File) {
 
 async function tryBasicTextExtraction(file: File) {
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 2000) // 2 second timeout
+  const timeoutId = setTimeout(() => controller.abort(), 3000) // 3 second timeout
 
   try {
     console.log(`Attempting basic text extraction for ${file.name}`)
