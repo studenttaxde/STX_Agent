@@ -20,12 +20,12 @@ export async function POST(request: NextRequest) {
       const file = files[i]
       console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`)
       
-      // Check file size (max 10MB to avoid timeouts)
-      if (file.size > 10 * 1024 * 1024) {
+      // Check file size (max 5MB to avoid timeouts)
+      if (file.size > 5 * 1024 * 1024) {
         results.push({
           filename: file.name,
           success: false,
-          error: 'File too large (max 10MB). Please use a smaller PDF file.'
+          error: 'File too large (max 5MB). Please use a smaller PDF file to avoid timeouts.'
         })
         continue
       }
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
       }
       
       try {
-        // Use real PDF extraction with proper timeout handling
+        // Use real PDF extraction with optimized timeout handling
         const result = await tryBackendExtraction(file)
         
         results.push(result)
@@ -49,10 +49,23 @@ export async function POST(request: NextRequest) {
         
       } catch (error) {
         console.error(`Error processing ${file.name}:`, error)
+        
+        // Provide specific error messages based on the error type
+        let errorMessage = 'PDF extraction failed';
+        if (error instanceof Error) {
+          if (error.name === 'AbortError') {
+            errorMessage = 'PDF extraction timed out. The service is taking too long to process your file. Please try with a smaller file (under 5MB) or try again later.';
+          } else if (error.message.includes('timeout')) {
+            errorMessage = 'PDF extraction service timeout. Please try again with a smaller file or contact support.';
+          } else {
+            errorMessage = error.message;
+          }
+        }
+        
         results.push({
           filename: file.name,
           success: false,
-          error: error instanceof Error ? error.message : 'PDF extraction service timeout - please try again'
+          error: errorMessage
         })
       }
     }
@@ -78,10 +91,27 @@ async function tryBackendExtraction(file: File) {
   formDataToSend.append('file', file)
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 8000) // 8 seconds to stay under Netlify limit
+  const timeoutId = setTimeout(() => controller.abort(), 7000) // 7 seconds to stay well under Netlify limit
 
   try {
     console.log(`Attempting real PDF extraction for ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB) to ${config.backendUrl}`)
+    
+    // First, check if the service is available
+    try {
+      const healthCheck = await fetch(`${config.backendUrl}/health`, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: {
+          'Accept': 'application/json',
+        }
+      })
+      
+      if (!healthCheck.ok) {
+        throw new Error(`Backend service is not responding properly (${healthCheck.status}). Please try again later.`)
+      }
+    } catch (healthError) {
+      console.warn('Health check failed, proceeding anyway:', healthError)
+    }
     
     const response = await fetch(`${config.backendUrl}/extract-text`, {
       method: 'POST',
@@ -98,36 +128,29 @@ async function tryBackendExtraction(file: File) {
       if (response.status === 504) {
         throw new Error('PDF extraction service timeout - the service is taking too long to process your file. Please try again with a smaller file or contact support.')
       }
-      throw new Error(`PDF extraction service error: ${response.status}`)
+      throw new Error(`PDF extraction service error: ${response.status} ${response.statusText}`)
     }
 
-    const result = await response.json()
-    console.log(`Real PDF extraction successful for ${file.name}`)
+    const data = await response.json()
     
+    if (!data.success) {
+      throw new Error(data.error || 'PDF extraction failed')
+    }
+
     return {
       filename: file.name,
       success: true,
-      data: result
+      data: data.extracted_text,
+      metadata: data.metadata || {}
     }
 
   } catch (error) {
     clearTimeout(timeoutId)
-    console.log(`Real PDF extraction failed for ${file.name}:`, error)
     
-    let errorMessage = 'Real PDF extraction failed - please try again or contact support'
-    
-    if (error instanceof Error) {
-      if (error.name === 'AbortError') {
-        errorMessage = 'PDF extraction timeout - the service is taking too long. Please try again with a smaller file or contact support.'
-      } else if (error.message.includes('timeout')) {
-        errorMessage = error.message
-      }
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('PDF extraction timed out. Please try with a smaller file (under 5MB) or try again later.')
     }
     
-    return {
-      filename: file.name,
-      success: false,
-      error: errorMessage
-    }
+    throw error
   }
 }
