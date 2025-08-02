@@ -296,25 +296,16 @@ export class PflegedAgent {
         }),
         func: async (input) => {
           try {
-            const data = JSON.parse(input.data);
-            this.state.extractedData = data;
-            this.state.step = 'extract';
+            // Use the unified setExtractedData method
+            this.setExtractedData(input.data);
             
-            // Log tool usage
-            this.state.debugLog.push({
-              tool: 'analyzeExtractedData',
-              timestamp: new Date(),
-              input: input,
-              output: { dataKeys: Object.keys(data) }
-            });
+            const data = this.state.extractedData;
+            if (!data) {
+              throw new Error('Failed to parse extracted data');
+            }
             
             // Check if we have enough data for autonomous analysis
             const hasBasicData = data.gross_income && data.income_tax_paid && data.year;
-            
-            if (hasBasicData) {
-              // Trigger autonomous tool chain in next interaction
-              this.state.hasRunToolChain = false;
-            }
             
             return JSON.stringify({
               success: true,
@@ -344,51 +335,24 @@ export class PflegedAgent {
         }),
         func: async (input) => {
           try {
-            // Calculate tax summary directly
-            const totalDeductions = input.deductions.reduce((sum, d) => sum + d.amount, 0);
-            const taxableIncome = Math.max(0, input.grossIncome - totalDeductions);
-            const year = this.state.extractedData?.year || 2021;
-            const threshold = PflegedAgent.TAX_FREE_THRESHOLDS[year] || 10908;
+            // Use the unified getTaxCalculation method
+            const calculation = this.getTaxCalculation() as TaxCalculation;
             
-            // Check for Verlustvortrag (loss carryforward)
-            const verlustvortrag = this.state.deductionAnswers['master_verlustvortrag']?.amount || 0;
-            const finalTaxableIncome = Math.max(0, taxableIncome - verlustvortrag);
-            
-            // REFUND FIRST LOGIC: If taxable income is below threshold, full refund
-            let refund = 0;
-            if (finalTaxableIncome <= threshold) {
-              refund = input.taxPaid; // Full refund when below threshold
-            } else {
-              // If above threshold, calculate proper German tax
-              const estimatedTax = this.calculateGermanTax(finalTaxableIncome, year);
-              refund = Math.max(0, input.taxPaid - estimatedTax);
+            if (!calculation) {
+              throw new Error('No extracted data available for calculation');
             }
-
-            const summary = {
-              grossIncome: input.grossIncome,
-              totalDeductions,
-              taxableIncome: finalTaxableIncome,
-              estimatedTax: finalTaxableIncome * 0.15,
-              taxPaid: input.taxPaid,
-              refund,
-              year
-            };
-
-            this.state.taxCalculation = summary;
-            this.state.step = 'calculate';
-            this.state.refundEstimate = refund;
             
             // Log tool usage
             this.state.debugLog.push({
               tool: 'calculateTaxSummary',
               timestamp: new Date(),
               input: input,
-              output: summary
+              output: calculation
             });
             
             return JSON.stringify({
               success: true,
-              summary: summary,
+              summary: calculation,
               message: 'Tax calculation completed'
             });
           } catch (error) {
@@ -409,30 +373,27 @@ export class PflegedAgent {
         }),
         func: async (input) => {
           try {
-            const year = input.year || this.state.extractedData?.year || 2021;
-            const threshold = PflegedAgent.TAX_FREE_THRESHOLDS[year] || 10908;
-            const isBelowThreshold = input.taxableIncome <= threshold;
+            // Use the unified checkTaxThreshold method
+            const result = this.checkTaxThreshold(input.taxableIncome, input.year);
             
-            this.state.thresholdCheckResult = {
-              isBelowThreshold,
-              threshold,
-              taxableIncome: input.taxableIncome
-            };
+            if (!result) {
+              throw new Error('Unable to check tax threshold - no data available');
+            }
             
             // Log tool usage
             this.state.debugLog.push({
               tool: 'checkTaxThreshold',
               timestamp: new Date(),
               input: input,
-              output: { isBelowThreshold, threshold, taxableIncome: input.taxableIncome }
+              output: result
             });
             
             return JSON.stringify({
               success: true,
-              isBelowThreshold,
-              threshold,
-              taxableIncome: input.taxableIncome,
-              message: isBelowThreshold ? 
+              isBelowThreshold: result.isBelowThreshold,
+              threshold: result.threshold,
+              taxableIncome: result.taxableIncome,
+              message: result.isBelowThreshold ? 
                 `Income below threshold - eligible for full refund` : 
                 `Income above threshold - partial refund possible`
             });
@@ -1247,139 +1208,73 @@ Please answer with the amount in euros, or "no" if you don't have this expense.`
     };
   }
 
+  // Legacy method for backward compatibility - now uses unified getTaxCalculation
   private generateFinalSummary(): string {
-    if (!this.state.extractedData) {
-      return "I don't have your tax data to generate a summary.";
-    }
-
-    const totalDeductions = Object.values(this.state.deductionAnswers)
-      .filter(a => a.answer)
-      .reduce((sum, a) => sum + (a.amount || 0), 0);
-
-    const { year, gross_income, income_tax_paid, full_name, employer } = this.state.extractedData;
-    const taxableIncome = Math.max(0, (gross_income || 0) - totalDeductions);
-    const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 10908;
+    const result = this.getTaxCalculation({ 
+      includeSummary: true, 
+      includePersonalization: true, 
+      format: 'markdown' 
+    });
     
-    let refund = 0;
-    if (taxableIncome <= threshold) {
-      refund = income_tax_paid || 0; // Full refund when below threshold
-    } else {
-      const estimatedTax = this.calculateGermanTax(taxableIncome, year);
-      refund = Math.max(0, (income_tax_paid || 0) - estimatedTax);
+    if (typeof result === 'string') {
+      // Save summary to database
+      const calculation = this.getTaxCalculation() as TaxCalculation;
+      if (calculation && this.state.userId && this.state.taxYear) {
+        this.saveTaxSummary(result, calculation.refund).catch(error => {
+          console.error('Error saving tax summary:', error);
+        });
+      }
+      
+      this.state.step = 'summary';
+      this.state.isComplete = true;
+      
+      return result;
     }
-
-    this.state.step = 'summary';
-    this.state.isComplete = true;
-
-    // Build deductions list
-    const appliedDeductions = Object.values(this.state.deductionAnswers)
-      .filter(a => a.answer && (a.amount || 0) > 0)
-      .map(a => `- ${a.details}`);
-
-    // Identify missing information
-    const missingInfo = [];
-    if (!full_name) missingInfo.push("Full name");
-    if (!employer) missingInfo.push("Employer information");
-    if (!year) missingInfo.push("Tax year confirmation");
-    if (!income_tax_paid) missingInfo.push("Tax paid amount");
-
-    // Generate recommended next steps
-    const nextSteps = [];
-    if (refund > 0) {
-      nextSteps.push("File your tax return to claim your refund");
-    }
-    if (totalDeductions > 0) {
-      nextSteps.push("Gather receipts for claimed deductions");
-    }
-    if (missingInfo.length > 0) {
-      nextSteps.push("Provide missing information for accurate calculation");
-    }
-    if (!this.state.extractedData.solidaritaetszuschlag) {
-      nextSteps.push("Confirm solidarity tax amount if applicable");
-    }
-
-    // Generate required documents list
-    const requiredDocs = [
-      `${year || 'Current'} Lohnsteuerbescheinigung`,
-      "Valid identification document"
-    ];
     
-    if (totalDeductions > 0) {
-      requiredDocs.push("Receipts for claimed deductions");
-    }
-    if (this.state.deductionAnswers['bachelor_tuition']?.amount || 
-        this.state.deductionAnswers['master_tuition']?.amount) {
-      requiredDocs.push("University enrollment certificate");
-    }
-    if (this.state.deductionAnswers['bachelor_books']?.amount || 
-        this.state.deductionAnswers['master_books']?.amount) {
-      requiredDocs.push("Receipts for study materials");
-    }
-
-    // Generate personalized advice based on user profile
-    let personalizedAdvice = '';
-    if (this.state.userProfile) {
-      const profile = this.state.userProfile;
-      
-      if (profile.job_type === 'freelancer') {
-        personalizedAdvice += '\n\n💼 **Freelancer-Specific Advice:**\n- Consider home office deductions for workspace expenses\n- Track all business-related travel and meals\n- Keep detailed records of professional development costs\n- Consider quarterly tax payments to avoid penalties';
-      }
-      
-      if (profile.marital_status === 'married') {
-        personalizedAdvice += '\n\n💑 **Married Filing Benefits:**\n- You may benefit from joint filing with your spouse\n- Consider income splitting strategies\n- Review spouse\'s income for joint deduction opportunities';
-      }
-      
-      if (profile.age && profile.age < 25) {
-        personalizedAdvice += '\n\n🎓 **Student-Specific Tips:**\n- You may be eligible for additional education credits\n- Consider claiming moving expenses if you relocated for studies\n- Review if you qualify for the "Ausbildungskosten" deduction';
-      }
-      
-      if (profile.income_brackets === 'low') {
-        personalizedAdvice += '\n\n💰 **Low Income Benefits:**\n- You may qualify for additional social benefits\n- Consider applying for "Arbeitslosengeld II" if applicable\n- Review eligibility for housing benefits';
-      }
-    }
-
-    const summaryText = `# 📊 **Tax Filing Summary**
-
-## ✅ **Estimated Refund**
-**€${refund.toLocaleString('de-DE', { minimumFractionDigits: 2 })}**
-
-${refund > 0 ? '🎉 You are eligible for a tax refund!' : 'No refund available.'}
-
-## 📉 **Deductions Applied**
-${appliedDeductions.length > 0 ? appliedDeductions.join('\n') : '- No deductions applied'}
-
-## 📎 **Missing or Incomplete Information**
-${missingInfo.length > 0 ? missingInfo.map(item => `- ${item}`).join('\n') : '- All required information provided'}
-
-## 📝 **Recommended Next Steps**
-${nextSteps.map(step => `- ${step}`).join('\n')}
-
-## 📂 **Required Documents**
-${requiredDocs.map(doc => `- ${doc}`).join('\n')}${personalizedAdvice}
-
----
-*This summary is based on the information provided. For official filing, please consult with a tax professional.*`;
-
-    // Save summary to database
-    if (this.state.userId && this.state.taxYear) {
-      this.saveTaxSummary(summaryText, refund).catch(error => {
-        console.error('Error saving tax summary:', error);
-      });
-    }
-
-    return summaryText;
+    return "I don't have your tax data to generate a summary.";
   }
 
-  // Enhanced methods from taxAdvisor.ts
-  setExtractedData(data: ExtractedData): void {
-    this.state.extractedData = data;
+  // Unified data analysis and extraction method
+  setExtractedData(data: ExtractedData | string): void {
+    let extractedData: ExtractedData;
+    
+    // Handle both ExtractedData objects and JSON strings
+    if (typeof data === 'string') {
+      try {
+        extractedData = JSON.parse(data);
+      } catch (error) {
+        console.error('Failed to parse extracted data:', error);
+        return;
+      }
+    } else {
+      extractedData = data;
+    }
+    
+    this.state.extractedData = extractedData;
     this.state.step = 'extract';
+    
+    // Log tool usage for debugging
+    this.state.debugLog.push({
+      tool: 'setExtractedData',
+      timestamp: new Date(),
+      input: { dataType: typeof data, dataKeys: Object.keys(extractedData) },
+      output: { success: true }
+    });
+    
+    // Check if we have enough data for autonomous analysis
+    const hasBasicData = extractedData.gross_income && extractedData.income_tax_paid && extractedData.year;
+    
+    if (hasBasicData) {
+      // Trigger autonomous tool chain in next interaction
+      this.state.hasRunToolChain = false;
+    }
+    
     console.log('Data extracted:', {
-      year: data.year,
-      gross_income: data.gross_income,
-      income_tax_paid: data.income_tax_paid,
-      employer: data.employer,
-      full_name: data.full_name
+      year: extractedData.year,
+      gross_income: extractedData.gross_income,
+      income_tax_paid: extractedData.income_tax_paid,
+      employer: extractedData.employer,
+      full_name: extractedData.full_name
     });
   }
 
@@ -1407,17 +1302,40 @@ ${requiredDocs.map(doc => `- ${doc}`).join('\n')}${personalizedAdvice}
 ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszuschlag).toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n` : ''}📅 **Detected Tax Year:** ${year || "Not specified"}`;
   }
 
-  private isBelowThreshold(): boolean {
-    if (!this.state.extractedData) return false;
+  // Unified threshold checking method
+  checkTaxThreshold(taxableIncome?: number, year?: number): {
+    isBelowThreshold: boolean;
+    threshold: number;
+    taxableIncome: number;
+    year: number;
+  } | null {
+    if (!this.state.extractedData && !taxableIncome) {
+      return null;
+    }
+
+    const checkYear = year || this.state.extractedData?.year || 2021;
+    const checkTaxableIncome = taxableIncome ?? (this.state.extractedData?.gross_income || 0);
+    const threshold = PflegedAgent.TAX_FREE_THRESHOLDS[checkYear] || 10908;
+    const isBelowThreshold = checkTaxableIncome <= threshold;
     
-    const year = this.state.extractedData.year;
-    const grossIncome = this.state.extractedData.gross_income || 0;
+    const result = {
+      isBelowThreshold,
+      threshold,
+      taxableIncome: checkTaxableIncome,
+      year: checkYear
+    };
+
+    // Update state for tracking
+    this.state.thresholdCheckResult = {
+      isBelowThreshold,
+      threshold,
+      taxableIncome: checkTaxableIncome
+    };
+
+    // Log for debugging
+    console.log(`Threshold check: year=${checkYear}, income=${checkTaxableIncome}, threshold=${threshold}, isBelow=${isBelowThreshold}`);
     
-    if (!year) return false;
-    
-    const threshold = PflegedAgent.TAX_FREE_THRESHOLDS[year];
-    console.log(`Threshold check: year=${year}, income=${grossIncome}, threshold=${threshold}, isBelow=${threshold !== undefined && grossIncome < threshold}`);
-    return threshold !== undefined && grossIncome < threshold;
+    return result;
   }
 
   getState(): PflegedAgentState {
@@ -1562,24 +1480,20 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
       return "I don't have your tax data to explain the calculation. Please upload your tax documents first.";
     }
 
-    const { gross_income, income_tax_paid, year } = this.state.extractedData;
-    const totalDeductions = Object.values(this.state.deductionAnswers)
-      .filter(a => a.answer)
-      .reduce((sum, a) => sum + (a.amount || 0), 0);
-    
-    const taxableIncome = Math.max(0, (gross_income || 0) - totalDeductions);
+    // Use the unified getTaxCalculation method
+    const calculation = this.getTaxCalculation() as TaxCalculation;
+    if (!calculation) {
+      return "I don't have your tax data to explain the calculation. Please upload your tax documents first.";
+    }
+
+    const { grossIncome, totalDeductions, taxableIncome, taxPaid, refund, year } = calculation;
     const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 10908;
     
-    // Calculate refund using the same logic as generateFinalSummary
-    let refund = 0;
+    // Generate explanation based on threshold check
     let explanation = '';
-    
     if (taxableIncome <= threshold) {
-      refund = income_tax_paid || 0; // Full refund when below threshold
       explanation = `Since your taxable income (€${taxableIncome.toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is below the tax-free threshold (€${threshold.toLocaleString('de-DE')}) for ${year}, you are eligible for a **full refund** of all taxes paid.`;
     } else {
-      const estimatedTax = this.calculateGermanTax(taxableIncome, year);
-      refund = Math.max(0, (income_tax_paid || 0) - estimatedTax);
       explanation = `Since your taxable income (€${taxableIncome.toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is above the tax-free threshold (€${threshold.toLocaleString('de-DE')}) for ${year}, we calculate your refund as the difference between taxes paid and estimated tax liability.`;
     }
 
@@ -1602,14 +1516,14 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
     const explanationText = `# 📊 **Tax Refund Calculation Explanation**
 
 ## 1️⃣ **Income Analysis**
-- **Gross Income:** €${Number(gross_income || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+- **Gross Income:** €${Number(grossIncome || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
 - **Tax Year:** ${year || 'Not specified'}
 
 ## 2️⃣ **Deductions Applied**
 ${deductionsBreakdown.length > 0 ? deductionsBreakdown.join('\n') : '- No deductions claimed'}
 
 ## 3️⃣ **Taxable Income Calculation**
-- **Gross Income:** €${Number(gross_income || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+- **Gross Income:** €${Number(grossIncome || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
 - **Total Deductions:** €${totalDeductions.toLocaleString('de-DE', { minimumFractionDigits: 2 })}
 - **Taxable Income:** €${taxableIncome.toLocaleString('de-DE', { minimumFractionDigits: 2 })}
 
@@ -1619,7 +1533,7 @@ ${deductionsBreakdown.length > 0 ? deductionsBreakdown.join('\n') : '- No deduct
 - **Status:** ${taxableIncome <= threshold ? 'Below threshold' : 'Above threshold'}
 
 ## 5️⃣ **Tax Calculation**
-- **Taxes Paid:** €${Number(income_tax_paid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+- **Taxes Paid:** €${Number(taxPaid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
 ${taxableIncome > threshold ? `- **Estimated Tax Liability:** €${this.calculateGermanTax(taxableIncome, year).toLocaleString('de-DE', { minimumFractionDigits: 2 })}` : ''}
 
 ## 6️⃣ **Refund Calculation**
@@ -1668,48 +1582,164 @@ ${explanation}
     return Object.values(this.state.deductionAnswers);
   }
 
-  getTaxCalculation(): TaxCalculation | null {
-    if (!this.state.taxCalculation) {
-      // Calculate based on current state
-      const totalDeductions = Object.values(this.state.deductionAnswers)
-        .filter(a => a.answer)
-        .reduce((sum, a) => sum + (a.amount || 0), 0);
-
-      if (!this.state.extractedData) {
-        return null;
-      }
-
-      const grossIncome = this.state.extractedData.gross_income || 0;
-      const taxableIncome = Math.max(0, grossIncome - totalDeductions);
-      const taxPaid = this.state.extractedData.income_tax_paid || 0;
-      const year = this.state.extractedData.year;
-      const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 0;
-      
-      // Check for Verlustvortrag (loss carryforward)
-      const verlustvortrag = this.state.deductionAnswers['master_verlustvortrag']?.amount || 0;
-      const finalTaxableIncome = Math.max(0, taxableIncome - verlustvortrag);
-      
-      // REFUND FIRST LOGIC: If taxable income is below threshold, full refund
-      let refund = 0;
-      if (finalTaxableIncome <= threshold) {
-        refund = taxPaid; // Full refund when below threshold
-      } else {
-        // If above threshold, calculate proper German tax
-        const estimatedTax = this.calculateGermanTax(finalTaxableIncome, year);
-        refund = Math.max(0, taxPaid - estimatedTax);
-      }
-
-      this.state.taxCalculation = {
-        grossIncome,
-        totalDeductions,
-        taxableIncome: finalTaxableIncome,
-        estimatedTax: finalTaxableIncome * 0.15,
-        taxPaid,
-        refund,
-        year: year || 0
-      };
+  // Unified tax calculation method that handles both calculation and summary generation
+  getTaxCalculation(options?: {
+    includeSummary?: boolean;
+    includePersonalization?: boolean;
+    format?: 'json' | 'markdown' | 'both';
+  }): TaxCalculation | string | { calculation: TaxCalculation; summary: string } | null {
+    if (!this.state.extractedData) {
+      return null;
     }
-    return this.state.taxCalculation;
+
+    // Calculate deductions
+    const totalDeductions = Object.values(this.state.deductionAnswers)
+      .filter(a => a.answer)
+      .reduce((sum, a) => sum + (a.amount || 0), 0);
+
+    const { year, gross_income, income_tax_paid } = this.state.extractedData;
+    const taxableIncome = Math.max(0, (gross_income || 0) - totalDeductions);
+    const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 10908;
+    
+    // Check for Verlustvortrag (loss carryforward)
+    const verlustvortrag = this.state.deductionAnswers['master_verlustvortrag']?.amount || 0;
+    const finalTaxableIncome = Math.max(0, taxableIncome - verlustvortrag);
+    
+    // Calculate refund
+    let refund = 0;
+    if (finalTaxableIncome <= threshold) {
+      refund = income_tax_paid || 0; // Full refund when below threshold
+    } else {
+      const estimatedTax = this.calculateGermanTax(finalTaxableIncome, year);
+      refund = Math.max(0, (income_tax_paid || 0) - estimatedTax);
+    }
+
+    // Create calculation object
+    const calculation: TaxCalculation = {
+      grossIncome: gross_income || 0,
+      totalDeductions,
+      taxableIncome: finalTaxableIncome,
+      estimatedTax: finalTaxableIncome * 0.15,
+      taxPaid: income_tax_paid || 0,
+      refund,
+      year: year || 0
+    };
+
+    // Update state
+    this.state.taxCalculation = calculation;
+    this.state.refundEstimate = refund;
+    this.state.step = 'calculate';
+
+    // Return based on options
+    if (!options?.includeSummary) {
+      return calculation;
+    }
+
+    // Generate summary if requested
+    const summary = this.generateTaxSummary(calculation, options.includePersonalization);
+    
+    if (options.format === 'markdown') {
+      return summary;
+    } else if (options.format === 'both') {
+      return { calculation, summary };
+    } else {
+      return calculation;
+    }
+  }
+
+  // Unified tax summary generation
+  private generateTaxSummary(calculation: TaxCalculation, includePersonalization: boolean = false): string {
+    const { grossIncome, totalDeductions, taxableIncome, taxPaid, refund, year } = calculation;
+    const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 10908;
+    
+    // Build deductions list
+    const appliedDeductions = Object.values(this.state.deductionAnswers)
+      .filter(a => a.answer && (a.amount || 0) > 0)
+      .map(a => `- ${a.details}`);
+
+    // Identify missing information
+    const missingInfo = [];
+    if (!this.state.extractedData?.full_name) missingInfo.push("Full name");
+    if (!this.state.extractedData?.employer) missingInfo.push("Employer information");
+    if (!year) missingInfo.push("Tax year confirmation");
+    if (!taxPaid) missingInfo.push("Tax paid amount");
+
+    // Generate recommended next steps
+    const nextSteps = [];
+    if (refund > 0) {
+      nextSteps.push("File your tax return to claim your refund");
+    }
+    if (totalDeductions > 0) {
+      nextSteps.push("Gather receipts for claimed deductions");
+    }
+    if (missingInfo.length > 0) {
+      nextSteps.push("Provide missing information for accurate calculation");
+    }
+    if (!this.state.extractedData?.solidaritaetszuschlag) {
+      nextSteps.push("Confirm solidarity tax amount if applicable");
+    }
+
+    // Generate required documents list
+    const requiredDocs = [
+      `${year || 'Current'} Lohnsteuerbescheinigung`,
+      "Valid identification document"
+    ];
+    
+    if (totalDeductions > 0) {
+      requiredDocs.push("Receipts for claimed deductions");
+    }
+    if (this.state.deductionAnswers['bachelor_tuition']?.amount || 
+        this.state.deductionAnswers['master_tuition']?.amount) {
+      requiredDocs.push("University enrollment certificate");
+    }
+    if (this.state.deductionAnswers['bachelor_books']?.amount || 
+        this.state.deductionAnswers['master_books']?.amount) {
+      requiredDocs.push("Receipts for study materials");
+    }
+
+    // Generate personalized advice if requested
+    let personalizedAdvice = '';
+    if (includePersonalization && this.state.userProfile) {
+      const profile = this.state.userProfile;
+      
+      if (profile.job_type === 'freelancer') {
+        personalizedAdvice += '\n\n💼 **Freelancer-Specific Advice:**\n- Consider home office deductions for workspace expenses\n- Track all business-related travel and meals\n- Keep detailed records of professional development costs\n- Consider quarterly tax payments to avoid penalties';
+      }
+      
+      if (profile.marital_status === 'married') {
+        personalizedAdvice += '\n\n💑 **Married Filing Benefits:**\n- You may benefit from joint filing with your spouse\n- Consider income splitting strategies\n- Review spouse\'s income for joint deduction opportunities';
+      }
+      
+      if (profile.age && profile.age < 25) {
+        personalizedAdvice += '\n\n🎓 **Student-Specific Tips:**\n- You may be eligible for additional education credits\n- Consider claiming moving expenses if you relocated for studies\n- Review if you qualify for the "Ausbildungskosten" deduction';
+      }
+      
+      if (profile.income_brackets === 'low') {
+        personalizedAdvice += '\n\n💰 **Low Income Benefits:**\n- You may qualify for additional social benefits\n- Consider applying for "Arbeitslosengeld II" if applicable\n- Review eligibility for housing benefits';
+      }
+    }
+
+    return `# 📊 **Tax Filing Summary**
+
+## ✅ **Estimated Refund**
+**€${refund.toLocaleString('de-DE', { minimumFractionDigits: 2 })}**
+
+${refund > 0 ? '🎉 You are eligible for a tax refund!' : 'No refund available.'}
+
+## 📉 **Deductions Applied**
+${appliedDeductions.length > 0 ? appliedDeductions.join('\n') : '- No deductions applied'}
+
+## 📎 **Missing or Incomplete Information**
+${missingInfo.length > 0 ? missingInfo.map(item => `- ${item}`).join('\n') : '- All required information provided'}
+
+## 📝 **Recommended Next Steps**
+${nextSteps.map(step => `- ${step}`).join('\n')}
+
+## 📂 **Required Documents**
+${requiredDocs.map(doc => `- ${doc}`).join('\n')}${personalizedAdvice}
+
+---
+*This summary is based on the information provided. For official filing, please consult with a tax professional.*`;
   }
 
   private calculateGermanTax(taxableIncome: number, year: number | undefined): number {
