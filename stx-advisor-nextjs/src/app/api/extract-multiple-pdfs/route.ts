@@ -92,7 +92,15 @@ export async function POST(request: NextRequest) {
       const timePeriods: Array<{ filename: string; from: string; to: string }> = [];
 
       for (const extractorResult of extractorData.results) {
+        console.log(`Processing extractor result for ${extractorResult.fileName}:`, {
+          status: extractorResult.status,
+          hasText: !!extractorResult.text,
+          textLength: extractorResult.text?.length || 0,
+          error: extractorResult.error
+        });
+
         if (extractorResult.status !== 'success') {
+          console.error(`Extraction failed for ${extractorResult.fileName}:`, extractorResult.error);
           results.push({
             success: false,
             filename: extractorResult.fileName,
@@ -100,6 +108,20 @@ export async function POST(request: NextRequest) {
             page_count: 0,
             character_count: 0,
             error: extractorResult.error || 'Extraction failed'
+          });
+          failedFiles++;
+          continue;
+        }
+
+        if (!extractorResult.text || extractorResult.text.trim().length === 0) {
+          console.error(`No text extracted for ${extractorResult.fileName}`);
+          results.push({
+            success: false,
+            filename: extractorResult.fileName,
+            text: '',
+            page_count: 0,
+            character_count: 0,
+            error: 'No text extracted from PDF'
           });
           failedFiles++;
           continue;
@@ -152,6 +174,8 @@ Respond ONLY with a valid JSON object containing these fields. Use null for miss
               .replace(/^```json\s*|^```|```$/gim, '')
               .trim();
 
+            console.log(`[OpenAI cleaned response for ${extractorResult.fileName}]`, contentClean);
+
             try {
               const fields: GermanTaxFields = JSON.parse(contentClean);
               console.log(`[OpenAI parsed fields for ${extractorResult.fileName}]`, fields);
@@ -189,13 +213,14 @@ Respond ONLY with a valid JSON object containing these fields. Use null for miss
 
             } catch (parseError) {
               console.error(`JSON parse error for ${extractorResult.fileName}:`, parseError);
+              console.error(`Raw content that failed to parse:`, contentClean);
               results.push({
                 success: false,
                 filename: extractorResult.fileName,
                 text: extractorResult.text,
                 page_count: extractorResult.page_count,
                 character_count: extractorResult.character_count,
-                error: 'Failed to parse OpenAI response'
+                error: `Failed to parse OpenAI response: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`
               });
               failedFiles++;
             }
