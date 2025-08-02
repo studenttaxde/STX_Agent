@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { GermanTaxFields, MultiPDFExtractionResponse, TaxSummary, PDFExtractionResult } from '@/types';
+import { config } from '@/lib/config';
 
-const PDF_EXTRACTOR_URL = process.env.PDF_EXTRACTOR_URL || 'http://localhost:8001';
+const PDF_EXTRACTOR_URL = process.env.PDF_EXTRACTOR_URL || config.backendUrl;
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,23 +14,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No files provided' }, { status: 400 });
     }
 
+    console.log(`Processing ${files.length} files with multiple PDF extraction`);
+
     // Forward the files to the PDF extraction microservice
     const extractorFormData = new FormData();
     files.forEach(file => {
       extractorFormData.append('files', file);
     });
 
+    console.log(`Calling PDF extraction service at: ${PDF_EXTRACTOR_URL}/extract-multiple`);
+
     const extractorResponse = await fetch(`${PDF_EXTRACTOR_URL}/extract-multiple`, {
       method: 'POST',
       body: extractorFormData,
     });
 
+    console.log(`PDF extraction service response status: ${extractorResponse.status}`);
+
     if (!extractorResponse.ok) {
-      const errorData = await extractorResponse.json();
-      return NextResponse.json({ error: errorData.detail || 'PDF extraction failed' }, { status: extractorResponse.status });
+      const errorText = await extractorResponse.text();
+      console.error(`PDF extraction service error: ${extractorResponse.status} - ${errorText}`);
+      return NextResponse.json({ 
+        error: 'PDF extraction service failed', 
+        details: errorText 
+      }, { status: extractorResponse.status });
     }
 
     const extractorData = await extractorResponse.json();
+    console.log(`PDF extraction service returned:`, extractorData);
 
     // Process each extracted text with OpenAI
     const openaiApiKey = process.env.OPENAI_API_KEY;
