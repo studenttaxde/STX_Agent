@@ -14,38 +14,7 @@ import {
 import Tabs from '@/components/Tabs'
 import AutopilotFlow from '@/features/autopilot/page'
 
-// Parse German number format (e.g., "1.713,00" -> 1713.00)
-const parseGermanNumber = (value: string): number => {
-  if (!value) return 0
-  
-  // Remove all spaces and trim
-  let cleaned = value.replace(/\s/g, '').trim()
-  
-  // Handle German number format: 1.713,00 -> 1713.00
-  // Look for pattern: digits, optional dot, digits, comma, digits
-  const germanFormat = /^(\d+)(?:\.(\d+))?,(\d+)$/
-  const match = cleaned.match(germanFormat)
-  
-  if (match) {
-    // German format: 1.713,00 -> 1713.00
-    const wholePart = match[1] + (match[2] || '')
-    const decimalPart = match[3]
-    return parseFloat(`${wholePart}.${decimalPart}`) || 0
-  }
-  
-  // Handle simple comma format: 1713,00 -> 1713.00
-  if (cleaned.includes(',')) {
-    return parseFloat(cleaned.replace(',', '.')) || 0
-  }
-  
-  // Handle dot format: 1713.00 -> 1713.00
-  if (cleaned.includes('.')) {
-    return parseFloat(cleaned) || 0
-  }
-  
-  // Handle plain number
-  return parseFloat(cleaned) || 0
-}
+
 
 // Generate a simple user ID based on browser fingerprint or create a new one
 const generateUserId = (): string => {
@@ -276,46 +245,7 @@ function AdvisorChat() {
           data: resultData
         })
 
-        // If no AI data was extracted, try to extract basic info from text
-        if (!resultData.bruttolohn && !resultData.lohnsteuer && result.text) {
-          console.log(`Attempting basic extraction from text for ${result.fileName}`)
-          
-          // Try to extract basic information from the text using regex
-          const text = result.text.toLowerCase()
-          
-          // Look for common German tax document patterns
-          const bruttolohnMatch = text.match(/bruttoarbeitslohn[:\s]*([\d.,]+)/i)
-          const lohnsteuerMatch = text.match(/einbehaltene lohnsteuer[:\s]*([\d.,]+)/i)
-          const solidaritaetszuschlagMatch = text.match(/einbehaltener solidaritätszuschlag[:\s]*([\d.,]+)/i)
-          const yearMatch = text.match(/(\d{4})/g)
-          
-          if (bruttolohnMatch) {
-            const amount = parseGermanNumber(bruttolohnMatch[1])
-            aggregatedData.totalIncome += amount
-            console.log(`Extracted bruttolohn from text: ${amount}`)
-          }
-          
-          if (lohnsteuerMatch) {
-            const amount = parseGermanNumber(lohnsteuerMatch[1])
-            aggregatedData.lohnsteuer += amount
-            console.log(`Extracted lohnsteuer from text: ${amount}`)
-          }
-          
-          if (solidaritaetszuschlagMatch) {
-            const amount = parseGermanNumber(solidaritaetszuschlagMatch[1])
-            aggregatedData.solidaritaetszuschlag += amount
-            console.log(`Extracted solidaritaetszuschlag from text: ${amount}`)
-          }
-          
-          if (yearMatch && yearMatch.length > 0) {
-            const years = yearMatch.map((y: string) => parseInt(y)).filter((y: number) => y > 2000 && y < 2030)
-            if (years.length > 0) {
-              const year = Math.max(...years)
-              aggregatedData.years.add(year)
-              console.log(`Extracted year from text: ${year}`)
-            }
-          }
-        }
+
       })
 
       console.log('Final aggregated data:', aggregatedData)
