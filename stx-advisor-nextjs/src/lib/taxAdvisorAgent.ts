@@ -783,33 +783,49 @@ If this is correct, I'll help you with your tax filing process. If not, please u
   private handleConversationFallback(input: string): string {
     const lastUserMessage = input.toLowerCase();
     
+    // Track conversation step to prevent loops
     if (lastUserMessage.includes('yes') || lastUserMessage.includes('correct')) {
       if (!this.state.extractedData) {
         return "I don't have your tax data yet. Please upload your tax documents first.";
       }
       
-      const { year, gross_income } = this.state.extractedData;
-      const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 10908;
-      
-      if (gross_income && gross_income < threshold) {
-        return `Perfect! Since your income (€${Number(gross_income).toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is below the tax-free threshold (€${threshold.toLocaleString('de-DE')}) for ${year}, you are eligible for a **full refund** of your tax paid.
+      // If we're still in the initial confirmation step
+      if (this.state.step === 'extract' || this.state.step === 'confirm') {
+        this.state.step = 'questions';
+        const { year, gross_income } = this.state.extractedData;
+        const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 10908;
+        
+        if (gross_income && gross_income < threshold) {
+          this.state.step = 'summary';
+          return `Perfect! Since your income (€${Number(gross_income).toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is below the tax-free threshold (€${threshold.toLocaleString('de-DE')}) for ${year}, you are eligible for a **full refund** of your tax paid.
 
 Would you like me to help you file for another year?`;
-      } else {
-        return `Since your income exceeds the tax-free threshold, let's check for deductible expenses to reduce your taxable income.
+        } else {
+          return `Since your income exceeds the tax-free threshold, let's check for deductible expenses to reduce your taxable income.
 
 Please select your status for the year:
 1. **bachelor** (Bachelor's student)
 2. **master** (Master's student)  
 3. **new_employee** (Started job after graduation)
 4. **full_time** (Full-time employee)`;
+        }
+      } else if (this.state.step === 'questions') {
+        // User confirmed they want to proceed with deductions
+        return `Great! Let's start with your deduction questions. I'll ask you about various expenses that might be deductible.
+
+First, let me ask about your education expenses. Did you pay any tuition fees for your studies? (yes/no)`;
       }
     } else if (lastUserMessage.includes('no') || lastUserMessage.includes('wrong')) {
+      this.state.step = 'upload';
       return "Please upload the correct PDF for the year you want to file.";
     } else if (/^[1-4]$/.test(lastUserMessage) || ['bachelor', 'master', 'new_employee', 'full_time'].includes(lastUserMessage)) {
       const status = /^[1-4]$/.test(lastUserMessage) ? 
         ['bachelor', 'master', 'new_employee', 'full_time'][parseInt(lastUserMessage) - 1] : 
         lastUserMessage;
+      
+      // Set the deduction flow based on status
+      this.state.deductionFlow = this.deductionFlowMap[status as UserStatus];
+      this.state.step = 'questions';
       
       return `Perfect! I've set your status as: **${status.toUpperCase()}**
 
@@ -819,10 +835,25 @@ Based on your extracted data, here's your tax summary:
 **Gross Income:** €${Number(this.state.extractedData?.gross_income || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
 **Tax Paid:** €${Number(this.state.extractedData?.income_tax_paid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
 
-I'm now ready to help you with your tax filing. Would you like to proceed with deductions?`;
+I'm now ready to help you with your tax filing. Would you like to proceed with deductions? (yes/no)`;
+    } else if (lastUserMessage.includes('proceed') || lastUserMessage.includes('deductions')) {
+      if (this.state.deductionFlow) {
+        this.state.step = 'questions';
+        const firstQuestion = this.state.deductionFlow.questions[0];
+        return `Great! Let's start with your deduction questions. 
+
+**${firstQuestion.question}**
+
+Please answer with the amount in euros, or "no" if you don't have this expense.`;
+      } else {
+        return "I need to know your status first. Please select your status (1-4) or type bachelor/master/new_employee/full_time.";
+      }
     } else {
       return "I'm here to help with your German tax filing. Please follow the conversation flow and let me know if you need any clarification.";
     }
+    
+    // Fallback return statement
+    return "I'm here to help with your German tax filing. Please follow the conversation flow and let me know if you need any clarification.";
   }
 
   // Enhanced methods from taxAdvisor.ts
