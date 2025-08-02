@@ -484,30 +484,28 @@ export class PflegedAgent {
               });
             }
 
-            const { gross_income, income_tax_paid, year } = this.state.extractedData;
-            
-            // Step 1: Calculate tax summary
-            const totalDeductions = Object.values(this.state.deductionAnswers)
-              .filter(a => a.answer)
-              .reduce((sum, a) => sum + (a.amount || 0), 0);
-            
-            const taxableIncome = Math.max(0, (gross_income || 0) - totalDeductions);
-            const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 10908;
-            
-            // Step 2: Check threshold
-            const isBelowThreshold = taxableIncome <= threshold;
-            
-            // Step 3: Calculate refund
-            let refund = 0;
-            if (isBelowThreshold) {
-              refund = income_tax_paid || 0; // Full refund when below threshold
-            } else {
-              const estimatedTax = this.calculateGermanTax(taxableIncome, year);
-              refund = Math.max(0, (income_tax_paid || 0) - estimatedTax);
+            // Step 1: Use unified getTaxCalculation method
+            const calculation = this.getTaxCalculation() as TaxCalculation;
+            if (!calculation) {
+              throw new Error('No extracted data available for tool chain');
             }
-
-            // Step 4: Generate final summary
-            const finalSummary = this.generateFinalSummary();
+            
+            const { taxableIncome, refund, year } = calculation;
+            
+            // Step 2: Use unified checkTaxThreshold method
+            const thresholdResult = this.checkTaxThreshold(taxableIncome, year);
+            if (!thresholdResult) {
+              throw new Error('Unable to check tax threshold');
+            }
+            
+            const { isBelowThreshold, threshold } = thresholdResult;
+            
+            // Step 3: Generate final summary using unified method
+            const finalSummary = this.getTaxCalculation({ 
+              includeSummary: true, 
+              includePersonalization: true, 
+              format: 'markdown' 
+            }) as string;
             
             // Update state
             this.state.latestSummary = finalSummary;
@@ -1068,11 +1066,13 @@ If this is correct, I'll help you with your tax filing process. If not, please u
       if (this.state.step === 'extract' || this.state.step === 'confirm') {
         this.state.step = 'questions';
         const { year, gross_income } = this.state.extractedData;
-        const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 10908;
         
-        if (gross_income && gross_income < threshold) {
+        // Use unified checkTaxThreshold method
+        const thresholdResult = this.checkTaxThreshold(gross_income, year);
+        
+        if (thresholdResult && thresholdResult.isBelowThreshold) {
           this.state.step = 'summary';
-          return `Perfect! Since your income (€${Number(gross_income).toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is below the tax-free threshold (€${threshold.toLocaleString('de-DE')}) for ${year}, you are eligible for a **full refund** of your tax paid.
+          return `Perfect! Since your income (€${Number(gross_income).toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is below the tax-free threshold (€${thresholdResult.threshold.toLocaleString('de-DE')}) for ${year}, you are eligible for a **full refund** of your tax paid.
 
 Would you like me to help you file for another year?`;
         } else {
@@ -1134,7 +1134,11 @@ I'm now ready to help you with your tax filing. Would you like to proceed with d
 
     const currentQuestion = this.state.deductionFlow.questions[this.state.currentQuestionIndex];
     if (!currentQuestion) {
-      return this.generateFinalSummary();
+      return this.getTaxCalculation({ 
+        includeSummary: true, 
+        includePersonalization: true, 
+        format: 'markdown' 
+      }) as string;
     }
 
     // Process the user's answer
@@ -1148,8 +1152,12 @@ I'm now ready to help you with your tax filing. Would you like to proceed with d
     if (this.state.currentQuestionIndex < this.state.deductionFlow.questions.length) {
       return this.askNextDeductionQuestion();
     } else {
-      // All questions answered, generate summary
-      return this.generateFinalSummary();
+      // All questions answered, generate summary using unified method
+      return this.getTaxCalculation({ 
+        includeSummary: true, 
+        includePersonalization: true, 
+        format: 'markdown' 
+      }) as string;
     }
   }
 
@@ -1160,7 +1168,11 @@ I'm now ready to help you with your tax filing. Would you like to proceed with d
 
     const currentQuestion = this.state.deductionFlow.questions[this.state.currentQuestionIndex];
     if (!currentQuestion) {
-      return this.generateFinalSummary();
+      return this.getTaxCalculation({ 
+        includeSummary: true, 
+        includePersonalization: true, 
+        format: 'markdown' 
+      }) as string;
     }
 
     return `**Question ${this.state.currentQuestionIndex + 1} of ${this.state.deductionFlow.questions.length}:**
@@ -1858,10 +1870,16 @@ ${nextQuestion?.question}
 
 Please answer with the amount in euros, or "no" if you don't have this expense.`;
         } else {
-          // All questions answered, generate summary
+          // All questions answered, generate summary using unified method
+          const summary = this.getTaxCalculation({ 
+            includeSummary: true, 
+            includePersonalization: true, 
+            format: 'markdown' 
+          }) as string;
+          
           return `${response}
 
-${this.generateFinalSummary()}`;
+${summary}`;
         }
       }
 
