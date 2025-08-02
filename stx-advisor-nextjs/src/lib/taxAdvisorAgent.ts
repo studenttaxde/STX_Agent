@@ -33,6 +33,7 @@ export interface UserProfile {
 export interface PflegedAgentState {
   conversationId: string;
   userId?: string;
+  taxYear?: string; // Added for multi-year support
   extractedData?: ExtractedData;
   deductionAnswers: Record<string, DeductionAnswer>;
   currentQuestionIndex: number;
@@ -259,13 +260,19 @@ export class PflegedAgent {
     return `pfleged_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
-  async loadUserProfile(userId: string): Promise<UserProfile | null> {
+  async loadUserProfile(userId: string, taxYear?: string): Promise<UserProfile | null> {
     try {
-      const { data, error } = await this.supabase
+      let query = this.supabase
         .from('user_profiles')
         .select('*')
-        .eq('id', userId)
-        .single();
+        .eq('id', userId);
+
+      // If tax year is provided, filter by year
+      if (taxYear) {
+        query = query.eq('tax_year', taxYear);
+      }
+
+      const { data, error } = await query.single();
 
       if (error) {
         console.error('Error loading user profile:', error);
@@ -1331,7 +1338,7 @@ Please answer with the amount in euros, or "no" if you don't have this expense.`
       }
     }
 
-    return `# 📊 **Tax Filing Summary**
+    const summaryText = `# 📊 **Tax Filing Summary**
 
 ## ✅ **Estimated Refund**
 **€${refund.toLocaleString('de-DE', { minimumFractionDigits: 2 })}**
@@ -1352,6 +1359,15 @@ ${requiredDocs.map(doc => `- ${doc}`).join('\n')}${personalizedAdvice}
 
 ---
 *This summary is based on the information provided. For official filing, please consult with a tax professional.*`;
+
+    // Save summary to database
+    if (this.state.userId && this.state.taxYear) {
+      this.saveTaxSummary(summaryText, refund).catch(error => {
+        console.error('Error saving tax summary:', error);
+      });
+    }
+
+    return summaryText;
   }
 
   // Enhanced methods from taxAdvisor.ts
@@ -1408,10 +1424,11 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
     return { ...this.state };
   }
 
-  setUserId(userId: string) {
+  setUserId(userId: string, taxYear?: string) {
     this.state.userId = userId;
+    this.state.taxYear = taxYear;
     // Automatically load user profile when userId is set
-    this.loadUserProfile(userId).then(profile => {
+    this.loadUserProfile(userId, taxYear).then(profile => {
       this.state.userProfile = profile;
       console.log('User profile loaded:', profile);
     });
@@ -1433,6 +1450,7 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
         .from('user_profiles')
         .upsert({
           id: this.state.userId,
+          tax_year: this.state.taxYear,
           ...updates,
           updated_at: new Date().toISOString()
         })
@@ -1451,6 +1469,91 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
     } catch (error) {
       console.error('Error updating user profile:', error);
       return false;
+    }
+  }
+
+  async saveTaxSummary(summary: string, refund: number): Promise<boolean> {
+    try {
+      if (!this.state.userId || !this.state.taxYear) {
+        console.error('No userId or taxYear available for saving summary');
+        return false;
+      }
+
+      const { data, error } = await this.supabase
+        .from('tax_summaries')
+        .upsert({
+          user_id: this.state.userId,
+          tax_year: this.state.taxYear,
+          summary: summary,
+          refund: refund,
+          timestamp: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error saving tax summary:', error);
+        return false;
+      }
+
+      console.log('Tax summary saved:', data);
+      return true;
+    } catch (error) {
+      console.error('Error saving tax summary:', error);
+      return false;
+    }
+  }
+
+  async loadTaxSummary(taxYear: string): Promise<{ summary: string; refund: number } | null> {
+    try {
+      if (!this.state.userId) {
+        console.error('No userId available for loading summary');
+        return null;
+      }
+
+      const { data, error } = await this.supabase
+        .from('tax_summaries')
+        .select('*')
+        .eq('user_id', this.state.userId)
+        .eq('tax_year', taxYear)
+        .single();
+
+      if (error) {
+        console.error('Error loading tax summary:', error);
+        return null;
+      }
+
+      return {
+        summary: data.summary,
+        refund: data.refund
+      };
+    } catch (error) {
+      console.error('Error loading tax summary:', error);
+      return null;
+    }
+  }
+
+  async getAvailableYears(): Promise<string[]> {
+    try {
+      if (!this.state.userId) {
+        return [];
+      }
+
+      const { data, error } = await this.supabase
+        .from('tax_summaries')
+        .select('tax_year')
+        .eq('user_id', this.state.userId)
+        .order('tax_year', { ascending: false });
+
+      if (error) {
+        console.error('Error loading available years:', error);
+        return [];
+      }
+
+      return data.map(row => row.tax_year);
+    } catch (error) {
+      console.error('Error loading available years:', error);
+      return [];
     }
   }
 
