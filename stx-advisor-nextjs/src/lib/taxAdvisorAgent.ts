@@ -810,10 +810,8 @@ Please select your status for the year:
 4. **full_time** (Full-time employee)`;
         }
       } else if (this.state.step === 'questions') {
-        // User confirmed they want to proceed with deductions
-        return `Great! Let's start with your deduction questions. I'll ask you about various expenses that might be deductible.
-
-First, let me ask about your education expenses. Did you pay any tuition fees for your studies? (yes/no)`;
+        // Handle deduction question responses
+        return this.handleDeductionQuestionResponse(input);
       }
     } else if (lastUserMessage.includes('no') || lastUserMessage.includes('wrong')) {
       this.state.step = 'upload';
@@ -826,6 +824,7 @@ First, let me ask about your education expenses. Did you pay any tuition fees fo
       // Set the deduction flow based on status
       this.state.deductionFlow = this.deductionFlowMap[status as UserStatus];
       this.state.step = 'questions';
+      this.state.currentQuestionIndex = 0;
       
       return `Perfect! I've set your status as: **${status.toUpperCase()}**
 
@@ -839,21 +838,146 @@ I'm now ready to help you with your tax filing. Would you like to proceed with d
     } else if (lastUserMessage.includes('proceed') || lastUserMessage.includes('deductions')) {
       if (this.state.deductionFlow) {
         this.state.step = 'questions';
-        const firstQuestion = this.state.deductionFlow.questions[0];
-        return `Great! Let's start with your deduction questions. 
-
-**${firstQuestion.question}**
-
-Please answer with the amount in euros, or "no" if you don't have this expense.`;
+        this.state.currentQuestionIndex = 0;
+        return this.askNextDeductionQuestion();
       } else {
         return "I need to know your status first. Please select your status (1-4) or type bachelor/master/new_employee/full_time.";
       }
     } else {
-      return "I'm here to help with your German tax filing. Please follow the conversation flow and let me know if you need any clarification.";
+      // Handle deduction question responses
+      return this.handleDeductionQuestionResponse(input);
     }
     
     // Fallback return statement
     return "I'm here to help with your German tax filing. Please follow the conversation flow and let me know if you need any clarification.";
+  }
+
+  private handleDeductionQuestionResponse(input: string): string {
+    if (!this.state.deductionFlow) {
+      return "I need to set up your deduction flow first. Please select your status.";
+    }
+
+    const currentQuestion = this.state.deductionFlow.questions[this.state.currentQuestionIndex];
+    if (!currentQuestion) {
+      return this.generateFinalSummary();
+    }
+
+    // Process the user's answer
+    const answer = this.processDeductionAnswer(input, currentQuestion);
+    this.state.deductionAnswers[currentQuestion.id] = answer;
+
+    // Move to next question
+    this.state.currentQuestionIndex++;
+
+    // Check if we have more questions
+    if (this.state.currentQuestionIndex < this.state.deductionFlow.questions.length) {
+      return this.askNextDeductionQuestion();
+    } else {
+      // All questions answered, generate summary
+      return this.generateFinalSummary();
+    }
+  }
+
+  private askNextDeductionQuestion(): string {
+    if (!this.state.deductionFlow) {
+      return "I need to set up your deduction flow first.";
+    }
+
+    const currentQuestion = this.state.deductionFlow.questions[this.state.currentQuestionIndex];
+    if (!currentQuestion) {
+      return this.generateFinalSummary();
+    }
+
+    return `**Question ${this.state.currentQuestionIndex + 1} of ${this.state.deductionFlow.questions.length}:**
+
+${currentQuestion.question}
+
+Please answer with the amount in euros, or "no" if you don't have this expense.`;
+  }
+
+  private processDeductionAnswer(input: string, question: DeductionQuestion): DeductionAnswer {
+    const cleanInput = input.toLowerCase().trim();
+    
+    // Check for "no" responses
+    if (cleanInput.includes('no') || cleanInput === '0') {
+      return {
+        questionId: question.id,
+        answer: false,
+        amount: 0,
+        details: 'No expense claimed'
+      };
+    }
+    
+    // Extract numeric amount
+    const amountMatch = input.match(/(\d+(?:[.,]\d+)?)/);
+    let amount = 0;
+    let details = input;
+    
+    if (amountMatch) {
+      amount = parseFloat(amountMatch[1].replace(',', '.'));
+      details = `Claimed: €${amount.toLocaleString('de-DE', { minimumFractionDigits: 2 })}`;
+    }
+    
+    // Cap the amount at the maximum allowed
+    const maxAmount = question.maxAmount || 0;
+    if (amount > maxAmount) {
+      amount = maxAmount;
+      details += ` (capped at maximum allowed)`;
+    }
+    
+    return {
+      questionId: question.id,
+      answer: amount > 0,
+      amount: amount,
+      details: details
+    };
+  }
+
+  private generateFinalSummary(): string {
+    if (!this.state.extractedData) {
+      return "I don't have your tax data to generate a summary.";
+    }
+
+    const totalDeductions = Object.values(this.state.deductionAnswers)
+      .filter(a => a.answer)
+      .reduce((sum, a) => sum + (a.amount || 0), 0);
+
+    const { year, gross_income, income_tax_paid } = this.state.extractedData;
+    const taxableIncome = Math.max(0, (gross_income || 0) - totalDeductions);
+    const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 10908;
+    
+    let refund = 0;
+    if (taxableIncome <= threshold) {
+      refund = income_tax_paid || 0; // Full refund when below threshold
+    } else {
+      const estimatedTax = this.calculateGermanTax(taxableIncome, year);
+      refund = Math.max(0, (income_tax_paid || 0) - estimatedTax);
+    }
+
+    this.state.step = 'summary';
+    this.state.isComplete = true;
+
+    return `# 📊 **Tax Filing Summary**
+
+## 💰 **Financial Overview**
+- **Tax Year:** ${year}
+- **Gross Income:** €${Number(gross_income || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+- **Total Deductions:** €${totalDeductions.toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+- **Taxable Income:** €${taxableIncome.toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+- **Tax Paid:** €${Number(income_tax_paid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+
+## ✅ **Estimated Refund**
+**€${refund.toLocaleString('de-DE', { minimumFractionDigits: 2 })}**
+
+${refund > 0 ? '🎉 You are eligible for a tax refund!' : 'No refund available.'}
+
+## 📋 **Deductions Claimed**
+${Object.values(this.state.deductionAnswers)
+  .filter(a => a.answer && (a.amount || 0) > 0)
+  .map(a => `- ${a.details}`)
+  .join('\n')}
+
+Your tax filing is complete! Would you like to file for another year?`;
   }
 
   // Enhanced methods from taxAdvisor.ts
