@@ -251,12 +251,20 @@ function AdvisorChat() {
 
       // Load suggested deductions
       try {
-        const year = Math.max(...years.map((y: any) => parseInt(y)))
-        const suggestions = await getSuggestedDeductions(userId, year)
-        setSuggestedDeductions(suggestions)
+        if (years.length > 0) {
+          const year = Math.max(...years.map((y: any) => parseInt(y)))
+          if (isFinite(year) && year > 0) {
+            const suggestions = await getSuggestedDeductions(userId, year)
+            setSuggestedDeductions(suggestions)
+          }
+        }
       } catch (error) {
         console.error('Error fetching suggested deductions:', error)
       }
+
+      // Calculate year safely
+      const calculatedYear = years.length > 0 ? Math.max(...years.map((y: any) => parseInt(y))) : new Date().getFullYear()
+      const safeYear = isFinite(calculatedYear) && calculatedYear > 0 ? calculatedYear : new Date().getFullYear()
 
       // Update state with extracted data
       setState(prev => ({
@@ -266,13 +274,13 @@ function AdvisorChat() {
         extractedData: {
           ...aggregatedData,
           gross_income: aggregatedData.totalIncome,
-          year: Math.max(...years.map((y: any) => parseInt(y)))
+          year: safeYear
         },
         multiPDFData: {
           totalFiles: successfulResults.length,
           results: successfulResults,
           summary: {
-            year: Math.max(...years.map((y: any) => parseInt(y))),
+            year: safeYear,
             grossIncome: aggregatedData.totalIncome,
             incomeTaxPaid: 0,
             employer: aggregatedData.employers[0] || 'Unknown',
@@ -292,7 +300,7 @@ function AdvisorChat() {
           gross_income: aggregatedData.totalIncome,
           income_tax_paid: aggregatedData.lohnsteuer || 0, // Extract from PDF data
           solidaritaetszuschlag: aggregatedData.solidaritaetszuschlag || 0, // Extract from PDF data
-          year: Math.max(...years.map((y: any) => parseInt(y))),
+          year: safeYear,
           // Additional fields that might be useful
           totalIncome: aggregatedData.totalIncome,
           employers: aggregatedData.employers,

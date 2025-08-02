@@ -130,9 +130,11 @@ export async function POST(request: NextRequest) {
         try {
           // Process with OpenAI to extract German tax fields (with timeout)
           const openaiController = new AbortController();
-          const openaiTimeoutId = setTimeout(() => openaiController.abort(), 3000); // 3 seconds per file
+          const openaiTimeoutId = setTimeout(() => openaiController.abort(), 8000); // 8 seconds per file (increased from 3)
 
           try {
+            console.log(`[OpenAI] Processing ${extractorResult.fileName} with ${extractorResult.text.length} characters`);
+            
             const response = await openai.chat.completions.create({
               model: "gpt-4o",
               messages: [
@@ -239,13 +241,17 @@ Respond ONLY with a valid JSON object containing these fields. Use null for miss
                 error: 'OpenAI processing timed out'
               });
             } else {
+              // Provide more specific error information
+              const errorMessage = openaiError instanceof Error ? openaiError.message : 'Unknown OpenAI error';
+              console.error(`OpenAI error details for ${extractorResult.fileName}:`, errorMessage);
+              
               results.push({
                 success: false,
                 filename: extractorResult.fileName,
                 text: extractorResult.text,
                 page_count: extractorResult.page_count,
                 character_count: extractorResult.character_count,
-                error: 'OpenAI processing failed'
+                error: `OpenAI processing failed: ${errorMessage}`
               });
             }
             failedFiles++;
