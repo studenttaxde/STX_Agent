@@ -18,6 +18,13 @@
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
+# API routes should not be redirected
+[[redirects]]
+  from = "/api/*"
+  to = "/api/:splat"
+  status = 200
+
+# All other routes redirect to the app
 [[redirects]]
   from = "/*"
   to = "/"
