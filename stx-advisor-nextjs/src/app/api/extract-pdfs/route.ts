@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { config } from '@/lib/config'
 
-export const maxDuration = 25 // Increased for Render service
+export const maxDuration = 10 // Netlify limit - 10 seconds maximum
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No files provided' }, { status: 400 })
     }
 
-    console.log(`Processing ${files.length} files with real PDF extraction only`)
+    console.log(`Processing ${files.length} files with real PDF extraction`)
 
     const results = []
 
@@ -20,8 +20,28 @@ export async function POST(request: NextRequest) {
       const file = files[i]
       console.log(`Processing file ${i + 1}/${files.length}: ${file.name}`)
       
+      // Check file size (max 10MB to avoid timeouts)
+      if (file.size > 10 * 1024 * 1024) {
+        results.push({
+          filename: file.name,
+          success: false,
+          error: 'File too large (max 10MB). Please use a smaller PDF file.'
+        })
+        continue
+      }
+      
+      // Check file type
+      if (!file.name.toLowerCase().endsWith('.pdf')) {
+        results.push({
+          filename: file.name,
+          success: false,
+          error: 'Only PDF files are supported. Please upload a PDF file.'
+        })
+        continue
+      }
+      
       try {
-        // Only use real PDF extraction service - no fake data
+        // Use real PDF extraction with proper timeout handling
         const result = await tryBackendExtraction(file)
         
         results.push(result)
@@ -32,7 +52,7 @@ export async function POST(request: NextRequest) {
         results.push({
           filename: file.name,
           success: false,
-          error: error instanceof Error ? error.message : 'Real PDF extraction failed'
+          error: error instanceof Error ? error.message : 'PDF extraction service timeout - please try again'
         })
       }
     }
@@ -48,7 +68,7 @@ export async function POST(request: NextRequest) {
     console.error('PDF extraction error:', error)
     return NextResponse.json({
       error: 'Extraction failed',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: error instanceof Error ? error.message : 'Service timeout - please try again'
     }, { status: 500 })
   }
 }
@@ -58,10 +78,10 @@ async function tryBackendExtraction(file: File) {
   formDataToSend.append('file', file)
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 20000) // 20 seconds for Render service
+  const timeoutId = setTimeout(() => controller.abort(), 8000) // 8 seconds to stay under Netlify limit
 
   try {
-    console.log(`Attempting real PDF extraction for ${file.name} to ${config.backendUrl}`)
+    console.log(`Attempting real PDF extraction for ${file.name} (${(file.size / 1024 / 1024).toFixed(2)}MB) to ${config.backendUrl}`)
     
     const response = await fetch(`${config.backendUrl}/extract-text`, {
       method: 'POST',
@@ -75,6 +95,9 @@ async function tryBackendExtraction(file: File) {
     clearTimeout(timeoutId)
 
     if (!response.ok) {
+      if (response.status === 504) {
+        throw new Error('PDF extraction service timeout - the service is taking too long to process your file. Please try again with a smaller file or contact support.')
+      }
       throw new Error(`PDF extraction service error: ${response.status}`)
     }
 
@@ -90,10 +113,21 @@ async function tryBackendExtraction(file: File) {
   } catch (error) {
     clearTimeout(timeoutId)
     console.log(`Real PDF extraction failed for ${file.name}:`, error)
+    
+    let errorMessage = 'Real PDF extraction failed - please try again or contact support'
+    
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        errorMessage = 'PDF extraction timeout - the service is taking too long. Please try again with a smaller file or contact support.'
+      } else if (error.message.includes('timeout')) {
+        errorMessage = error.message
+      }
+    }
+    
     return {
       filename: file.name,
       success: false,
-      error: error instanceof Error ? error.message : 'Real PDF extraction failed - please try again or contact support'
+      error: errorMessage
     }
   }
 }
