@@ -935,7 +935,7 @@ Please answer with the amount in euros, or "no" if you don't have this expense.`
       .filter(a => a.answer)
       .reduce((sum, a) => sum + (a.amount || 0), 0);
 
-    const { year, gross_income, income_tax_paid } = this.state.extractedData;
+    const { year, gross_income, income_tax_paid, full_name, employer } = this.state.extractedData;
     const taxableIncome = Math.max(0, (gross_income || 0) - totalDeductions);
     const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 10908;
     
@@ -950,27 +950,72 @@ Please answer with the amount in euros, or "no" if you don't have this expense.`
     this.state.step = 'summary';
     this.state.isComplete = true;
 
-    return `# 📊 **Tax Filing Summary**
+    // Build deductions list
+    const appliedDeductions = Object.values(this.state.deductionAnswers)
+      .filter(a => a.answer && (a.amount || 0) > 0)
+      .map(a => `- ${a.details}`);
 
-## 💰 **Financial Overview**
-- **Tax Year:** ${year}
-- **Gross Income:** €${Number(gross_income || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
-- **Total Deductions:** €${totalDeductions.toLocaleString('de-DE', { minimumFractionDigits: 2 })}
-- **Taxable Income:** €${taxableIncome.toLocaleString('de-DE', { minimumFractionDigits: 2 })}
-- **Tax Paid:** €${Number(income_tax_paid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+    // Identify missing information
+    const missingInfo = [];
+    if (!full_name) missingInfo.push("Full name");
+    if (!employer) missingInfo.push("Employer information");
+    if (!year) missingInfo.push("Tax year confirmation");
+    if (!income_tax_paid) missingInfo.push("Tax paid amount");
+
+    // Generate recommended next steps
+    const nextSteps = [];
+    if (refund > 0) {
+      nextSteps.push("File your tax return to claim your refund");
+    }
+    if (totalDeductions > 0) {
+      nextSteps.push("Gather receipts for claimed deductions");
+    }
+    if (missingInfo.length > 0) {
+      nextSteps.push("Provide missing information for accurate calculation");
+    }
+    if (!this.state.extractedData.solidaritaetszuschlag) {
+      nextSteps.push("Confirm solidarity tax amount if applicable");
+    }
+
+    // Generate required documents list
+    const requiredDocs = [
+      `${year || 'Current'} Lohnsteuerbescheinigung`,
+      "Valid identification document"
+    ];
+    
+    if (totalDeductions > 0) {
+      requiredDocs.push("Receipts for claimed deductions");
+    }
+    if (this.state.deductionAnswers['bachelor_tuition']?.amount || 
+        this.state.deductionAnswers['master_tuition']?.amount) {
+      requiredDocs.push("University enrollment certificate");
+    }
+    if (this.state.deductionAnswers['bachelor_books']?.amount || 
+        this.state.deductionAnswers['master_books']?.amount) {
+      requiredDocs.push("Receipts for study materials");
+    }
+
+    return `# 📊 **Tax Filing Summary**
 
 ## ✅ **Estimated Refund**
 **€${refund.toLocaleString('de-DE', { minimumFractionDigits: 2 })}**
 
 ${refund > 0 ? '🎉 You are eligible for a tax refund!' : 'No refund available.'}
 
-## 📋 **Deductions Claimed**
-${Object.values(this.state.deductionAnswers)
-  .filter(a => a.answer && (a.amount || 0) > 0)
-  .map(a => `- ${a.details}`)
-  .join('\n')}
+## 📉 **Deductions Applied**
+${appliedDeductions.length > 0 ? appliedDeductions.join('\n') : '- No deductions applied'}
 
-Your tax filing is complete! Would you like to file for another year?`;
+## 📎 **Missing or Incomplete Information**
+${missingInfo.length > 0 ? missingInfo.map(item => `- ${item}`).join('\n') : '- All required information provided'}
+
+## 📝 **Recommended Next Steps**
+${nextSteps.map(step => `- ${step}`).join('\n')}
+
+## 📂 **Required Documents**
+${requiredDocs.map(doc => `- ${doc}`).join('\n')}
+
+---
+*This summary is based on the information provided. For official filing, please consult with a tax professional.*`;
   }
 
   // Enhanced methods from taxAdvisor.ts
