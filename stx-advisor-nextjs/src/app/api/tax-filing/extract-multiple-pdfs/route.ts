@@ -288,38 +288,17 @@ Respond ONLY with a valid JSON object containing these fields. Use null for miss
               const errorMessage = openaiError instanceof Error ? openaiError.message : 'Unknown OpenAI error';
               console.error(`OpenAI error details for ${extractorResult.fileName}:`, errorMessage);
               
-              // Check if it's an API key error and provide fallback
-              if (errorMessage.includes('401') || errorMessage.includes('Incorrect API key')) {
-                console.warn(`OpenAI API key error for ${extractorResult.fileName}, providing fallback data`);
-                results.push({
-                  success: true,
-                  filename: extractorResult.fileName,
-                  text: extractorResult.text,
-                  page_count: extractorResult.page_count,
-                  character_count: extractorResult.character_count,
-                  extractedData: {
-                    name: undefined,
-                    employer: undefined,
-                    time_period_from: undefined,
-                    time_period_to: undefined,
-                    bruttolohn: undefined,
-                    lohnsteuer: undefined,
-                    solidaritaetszuschlag: undefined,
-                    year: undefined
-                  }
-                });
-                processedFiles++;
-              } else {
-                results.push({
-                  success: false,
-                  filename: extractorResult.fileName,
-                  text: extractorResult.text,
-                  page_count: extractorResult.page_count,
-                  character_count: extractorResult.character_count,
-                  error: `OpenAI processing failed: ${errorMessage}`
-                });
-                failedFiles++;
-              }
+              // Fail fast for all OpenAI errors - no fallback with undefined data
+              console.error(`OpenAI processing failed for ${extractorResult.fileName}: ${errorMessage}`);
+              results.push({
+                success: false,
+                filename: extractorResult.fileName,
+                text: extractorResult.text,
+                page_count: extractorResult.page_count,
+                character_count: extractorResult.character_count,
+                error: `OpenAI processing failed: ${errorMessage}`
+              });
+              failedFiles++;
             }
           }
 
