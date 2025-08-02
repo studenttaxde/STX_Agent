@@ -20,6 +20,16 @@ from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 import json
 
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Or restrict to Netlify domain
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # LangSmith tracing setup
 from langchain.callbacks import LangChainTracer
 
