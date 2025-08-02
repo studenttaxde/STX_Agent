@@ -485,15 +485,22 @@ def extract_text_from_file(file_content: bytes, filename: str) -> dict:
 
 @app.get("/")
 def root():
+    """
+    Root endpoint providing service information
+    """
     return {
-        "message": "PDF Extractor Service is running", 
-        "version": "3.0.0", 
+        "message": "PDF Extractor Service - Active",
+        "version": "3.0.0",
+        "available_routes": ["/extract", "/health"],
         "features": ["LangChain Integration", "Text Enhancement", "Intelligent Processing", "LangSmith Tracing", "German Tax Document Parsing"],
         "tracing_enabled": tracing_enabled
     }
 
 @app.get("/health")
 def health():
+    """
+    Health check endpoint
+    """
     return {
         "status": "healthy", 
         "service": "pdf-extractor", 
@@ -506,11 +513,17 @@ async def extract_pdfs(files: List[UploadFile] = File(...)):
     """
     Unified endpoint for extracting text from PDF files (single or multiple)
     
+    This is the single official route for all PDF extraction operations.
+    Supports both single and multiple file uploads with comprehensive validation.
+    
     Args:
-        files: List of PDF files to extract text from
+        files: List of PDF files to extract text from (1-10 files)
         
     Returns:
         dict: Contains results for each file and summary statistics
+        
+    Raises:
+        HTTPException: For validation errors or processing failures
     """
     import time
     start_time = time.time()
@@ -661,23 +674,6 @@ async def extract_pdfs(files: List[UploadFile] = File(...)):
     except Exception as e:
         logger.error(f"Unexpected error processing files: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
-
-# Legacy endpoints - DEPRECATED (kept for backward compatibility but will be removed)
-@app.post("/extract-text")
-async def extract_text_legacy(file: UploadFile = File(...)):
-    """
-    DEPRECATED: Legacy single file endpoint - use /extract instead
-    """
-    logger.warning("Legacy /extract-text endpoint called - use /extract instead")
-    return await extract_pdfs([file])
-
-@app.post("/extract-multiple")
-async def extract_multiple_legacy(files: List[UploadFile] = File(...)):
-    """
-    DEPRECATED: Legacy multiple files endpoint - use /extract instead
-    """
-    logger.warning("Legacy /extract-multiple endpoint called - use /extract instead")
-    return await extract_pdfs(files)
 
 if __name__ == "__main__":
     import uvicorn
