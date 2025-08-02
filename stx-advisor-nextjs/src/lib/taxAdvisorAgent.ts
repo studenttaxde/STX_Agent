@@ -15,8 +15,6 @@ import {
   DeductionSummary,
   TaxAdvisorState
 } from '@/types';
-import { supabase } from './supabase';
-import { SupabaseService } from './supabaseService';
 
 export interface PflegedAgentState {
   conversationId: string;
@@ -343,40 +341,15 @@ export class PflegedAgent {
         }),
         func: async (input) => {
           try {
-            // Get loss carryforward from Supabase
-            const { data: lossData, error } = await supabase
-              .from('user_tax_data')
-              .select('loss_carryforward, loss_carryforward_used, loss_carryforward_remaining')
-              .eq('user_id', input.userId)
-              .eq('tax_year', input.year - 1)
-              .single();
+                    // Simplified loss carryforward handling without Supabase
+        const availableLoss = 0; // Default to 0 for now
+        const appliedLoss = Math.min(availableLoss, input.amount);
+        const remainingLoss = availableLoss - appliedLoss;
 
-            if (error) {
-              console.error('Error fetching loss carryforward:', error);
-              return JSON.stringify({
-                success: false,
-                error: 'Failed to fetch loss carryforward data'
-              });
-            }
-
-            const availableLoss = lossData?.loss_carryforward_remaining || 0;
-            const appliedLoss = Math.min(availableLoss, input.amount);
-            const remainingLoss = availableLoss - appliedLoss;
-
-            this.state.lossCarryforward = {
-              used: appliedLoss,
-              remaining: remainingLoss
-            };
-
-            // Update Supabase with used loss carryforward
-            await supabase
-              .from('user_tax_data')
-              .upsert({
-                user_id: input.userId,
-                tax_year: input.year,
-                loss_carryforward_used: appliedLoss,
-                loss_carryforward_remaining: remainingLoss
-              });
+        this.state.lossCarryforward = {
+          used: appliedLoss,
+          remaining: remainingLoss
+        };
 
             return JSON.stringify({
               success: true,
@@ -461,15 +434,8 @@ export class PflegedAgent {
               filing_date: new Date().toISOString().split('T')[0]
             };
 
-            // Store in Supabase
-            await supabase
-              .from('user_tax_data')
-              .upsert({
-                user_id: input.userId,
-                tax_year: input.year,
-                filing_json: finalSummary,
-                agent_notes: `Processed by Pfleged agent on ${new Date().toISOString()}`
-              });
+            // Store summary in memory (Supabase integration removed for now)
+            console.log('Tax filing summary generated:', finalSummary);
 
             return JSON.stringify({
               success: true,
@@ -495,18 +461,9 @@ export class PflegedAgent {
         }),
         func: async (input) => {
           try {
-            // Store current year data if needed
+            // Store current year data in memory (Supabase integration removed for now)
             if (input.preserveData && this.state.extractedData) {
-              await supabase
-                .from('user_tax_data')
-                .upsert({
-                  user_id: input.userId,
-                  tax_year: this.state.extractedData.year,
-                  filing_json: {
-                    conversation_id: this.state.conversationId,
-                    completed_at: new Date().toISOString()
-                  }
-                });
+              console.log('Preserving data for year:', this.state.extractedData.year);
             }
 
             // Reset state for new year
@@ -740,10 +697,19 @@ Your core responsibilities:
         timestamp: new Date()
       });
 
+      console.log('Running agent with input:', input);
+      console.log('Agent state before execution:', {
+        extractedData: this.state.extractedData ? 'Available' : 'Not available',
+        messagesCount: this.state.messages.length,
+        step: this.state.step
+      });
+
       // Run agent
       const result = await this.agentExecutor!.invoke({
         input: input
       });
+
+      console.log('Agent execution result:', result);
 
       // Add agent response to state
       this.state.messages.push({
@@ -755,16 +721,21 @@ Your core responsibilities:
       return result.output;
     } catch (error) {
       console.error('Agent execution error:', error);
+      console.error('Error details:', {
+        name: error instanceof Error ? error.name : 'Unknown',
+        message: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : 'No stack'
+      });
       
-      // Log error to Supabase
-      await SupabaseService.logError(
-        this.state.conversationId,
-        'agent_execution',
-        error instanceof Error ? error.message : 'Unknown error',
-        { endpoint: '/api/advisor/run-agent' }
-      );
+      // Log error to console instead of Supabase
+      console.error('Agent execution failed:', error instanceof Error ? error.message : 'Unknown error');
 
-      return 'I encountered an error while processing your request. Please try again or contact support.';
+      // Provide a more helpful fallback response based on the input
+      if (input.toLowerCase().includes('analyze') || input.toLowerCase().includes('initial')) {
+        return this.buildInitialSummary();
+      } else {
+        return 'I encountered an error while processing your request. Please try again or contact support.';
+      }
     }
   }
 
