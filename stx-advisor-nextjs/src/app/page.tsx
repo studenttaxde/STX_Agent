@@ -344,9 +344,9 @@ function AdvisorChat() {
         const successMessage = `✅ Successfully processed ${successfulResults.length} document(s)!
 
 📊 **Extracted Tax Data:**
-• Total Income: €${(aggregatedData.totalIncome / 100).toFixed(2)}
-• Income Tax Paid: €${(aggregatedData.lohnsteuer / 100).toFixed(2)}
-• Solidarity Tax: €${(aggregatedData.solidaritaetszuschlag / 100).toFixed(2)}
+• Total Income: €${formatCurrency(aggregatedData.totalIncome)}
+• Income Tax Paid: €${formatCurrency(aggregatedData.lohnsteuer)}
+• Solidarity Tax: €${formatCurrency(aggregatedData.solidaritaetszuschlag)}
 • Employers: ${aggregatedData.employers.join(', ') || 'Not specified'}
 • Year: ${safeYear}
 
