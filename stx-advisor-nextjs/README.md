@@ -31,3 +31,4 @@ npm run dev
 The application is deployed on Netlify with automatic deployments from the main branch.
 
 <!-- Trigger redeployment with updated environment variables -->
+# Build cache cleared Sun Aug  3 22:42:05 CEST 2025
