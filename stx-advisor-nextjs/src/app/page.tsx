@@ -11,8 +11,7 @@ import {
   getTaxFilingByYear, 
   hasExistingData 
 } from '@/services/supabaseService'
-import Tabs from '@/components/Tabs'
-import AutopilotFlow from '@/features/autopilot/page'
+
 
 
 
@@ -673,21 +672,7 @@ export default function TaxAdvisorApp() {
           <p className="text-gray-600">Your AI-powered German tax filing assistant</p>
         </div>
         
-        <Tabs 
-          tabs={[
-            {
-              key: 'advisor',
-              label: 'Advisor',
-              content: <AdvisorChat />
-            },
-            {
-              key: 'autopilot',
-              label: 'Autopilot',
-              content: <AutopilotFlow />
-            }
-          ]}
-          defaultTab="advisor"
-        />
+        <AdvisorChat />
       </div>
     </div>
   )
