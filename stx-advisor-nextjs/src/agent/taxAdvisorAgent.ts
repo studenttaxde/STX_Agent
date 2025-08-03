@@ -74,8 +74,15 @@ export interface PflegedAgentState {
  * 
  * Handles tax data analysis, deduction flows, and personalized tax advice
  * using LangChain and OpenAI for intelligent conversation management.
+ * 
+ * @class PflegedAgent
+ * @description Main agent class for German tax filing assistance
  */
 export class PflegedAgent {
+  // ============================================================================
+  // PRIVATE PROPERTIES
+  // ============================================================================
+  
   private llm: ChatOpenAI;
   private agentExecutor: AgentExecutor | null = null;
   private state: PflegedAgentState;
@@ -101,150 +108,110 @@ export class PflegedAgent {
       status: 'bachelor',
       questions: [
         {
-          id: 'bachelor_tuition',
-          question: 'Did you pay tuition fees for your bachelor studies?',
-          category: 'Education',
-          maxAmount: 6000
+          id: 'werbungskosten',
+          question: 'Do you have work-related expenses (Werbungskosten)? This includes travel to work, work clothes, home office, etc.',
+          category: 'Werbungskosten',
+          maxAmount: 1000,
+          required: false
         },
         {
-          id: 'bachelor_books',
-          question: 'Did you purchase books, study materials, or equipment for your studies?',
-          category: 'Education',
-          maxAmount: 1000
-        },
-        {
-          id: 'bachelor_travel',
-          question: 'Did you have travel expenses for your studies (commuting, field trips)?',
-          category: 'Travel',
-          maxAmount: 4500
-        },
-        {
-          id: 'bachelor_work',
-          question: 'Did you have work-related expenses (internships, part-time work)?',
-          category: 'Work',
-          maxAmount: 1000
+          id: 'sozialversicherung',
+          question: 'Do you have social security contributions (Sozialversicherung) that were not already deducted from your salary?',
+          category: 'Sozialversicherung',
+          maxAmount: 5000,
+          required: false
         }
       ],
-      order: ['bachelor_tuition', 'bachelor_books', 'bachelor_travel', 'bachelor_work']
+      order: ['werbungskosten', 'sozialversicherung']
     },
     master: {
       status: 'master',
       questions: [
         {
-          id: 'master_tuition',
-          question: 'Did you pay tuition fees for your master studies?',
-          category: 'Education',
-          maxAmount: 6000
+          id: 'werbungskosten',
+          question: 'Do you have work-related expenses (Werbungskosten)? This includes travel to work, work clothes, home office, etc.',
+          category: 'Werbungskosten',
+          maxAmount: 1000,
+          required: false
         },
         {
-          id: 'master_books',
-          question: 'Did you purchase books, study materials, or equipment for your studies?',
-          category: 'Education',
-          maxAmount: 1000
+          id: 'sozialversicherung',
+          question: 'Do you have social security contributions (Sozialversicherung) that were not already deducted from your salary?',
+          category: 'Sozialversicherung',
+          maxAmount: 5000,
+          required: false
         },
         {
-          id: 'master_travel',
-          question: 'Did you have travel expenses for your studies (commuting, field trips)?',
-          category: 'Travel',
-          maxAmount: 4500
-        },
-        {
-          id: 'master_work',
-          question: 'Did you have work-related expenses (internships, part-time work)?',
-          category: 'Work',
-          maxAmount: 1000
-        },
-        {
-          id: 'master_research',
-          question: 'Did you have research-related expenses (conferences, publications)?',
-          category: 'Research',
-          maxAmount: 2000
-        },
-        {
-          id: 'master_verlustvortrag',
-          question: 'Do you have any loss carryforward (Verlustvortrag) from previous years? This is crucial for master\'s students who may have had losses during bachelor studies.',
-          category: 'Loss Carryforward',
-          maxAmount: 10000
+          id: 'sonderausgaben',
+          question: 'Do you have special expenses (Sonderausgaben)? This includes church tax, insurance premiums, etc.',
+          category: 'Sonderausgaben',
+          maxAmount: 3000,
+          required: false
         }
       ],
-      order: ['master_tuition', 'master_books', 'master_travel', 'master_work', 'master_research', 'master_verlustvortrag']
+      order: ['werbungskosten', 'sozialversicherung', 'sonderausgaben']
     },
     new_employee: {
       status: 'new_employee',
       questions: [
         {
-          id: 'new_work_tools',
-          question: 'Did you purchase work-related tools, equipment, or software?',
-          category: 'Work',
-          maxAmount: 1000
+          id: 'werbungskosten',
+          question: 'Do you have work-related expenses (Werbungskosten)? This includes travel to work, work clothes, home office, etc.',
+          category: 'Werbungskosten',
+          maxAmount: 1000,
+          required: false
         },
         {
-          id: 'new_commuting',
-          question: 'Did you have commuting expenses to your new workplace?',
-          category: 'Travel',
-          maxAmount: 4500
-        },
-        {
-          id: 'new_work_clothes',
-          question: 'Did you purchase work-specific clothing or uniforms?',
-          category: 'Work',
-          maxAmount: 500
-        },
-        {
-          id: 'new_education',
-          question: 'Did you take any courses or training for your new job?',
-          category: 'Education',
-          maxAmount: 1000
+          id: 'sozialversicherung',
+          question: 'Do you have social security contributions (Sozialversicherung) that were not already deducted from your salary?',
+          category: 'Sozialversicherung',
+          maxAmount: 5000,
+          required: false
         }
       ],
-      order: ['new_work_tools', 'new_commuting', 'new_work_clothes', 'new_education']
+      order: ['werbungskosten', 'sozialversicherung']
     },
     full_time: {
       status: 'full_time',
       questions: [
         {
-          id: 'full_work_tools',
-          question: 'Did you purchase work-related tools, equipment, or software?',
-          category: 'Work',
-          maxAmount: 1000
+          id: 'werbungskosten',
+          question: 'Do you have work-related expenses (Werbungskosten)? This includes travel to work, work clothes, home office, etc.',
+          category: 'Werbungskosten',
+          maxAmount: 1000,
+          required: false
         },
         {
-          id: 'full_commuting',
-          question: 'Did you have commuting expenses to your workplace?',
-          category: 'Travel',
-          maxAmount: 4500
+          id: 'sozialversicherung',
+          question: 'Do you have social security contributions (Sozialversicherung) that were not already deducted from your salary?',
+          category: 'Sozialversicherung',
+          maxAmount: 5000,
+          required: false
         },
         {
-          id: 'full_work_clothes',
-          question: 'Did you purchase work-specific clothing or uniforms?',
-          category: 'Work',
-          maxAmount: 500
-        },
-        {
-          id: 'full_education',
-          question: 'Did you take any courses or training for your job?',
-          category: 'Education',
-          maxAmount: 1000
-        },
-        {
-          id: 'full_home_office',
-          question: 'Did you have home office expenses (furniture, equipment)?',
-          category: 'Work',
-          maxAmount: 1250
+          id: 'sonderausgaben',
+          question: 'Do you have special expenses (Sonderausgaben)? This includes church tax, insurance premiums, etc.',
+          category: 'Sonderausgaben',
+          maxAmount: 3000,
+          required: false
         }
       ],
-      order: ['full_work_tools', 'full_commuting', 'full_work_clothes', 'full_education', 'full_home_office']
+      order: ['werbungskosten', 'sozialversicherung', 'sonderausgaben']
     }
   };
 
+  // ============================================================================
+  // CONSTRUCTOR
+  // ============================================================================
+  
   /**
-   * Initialize the Pfleged agent with OpenAI LLM and default state
+   * Initialize the Pfleged agent with OpenAI and LangChain setup
    */
   constructor() {
     this.llm = new ChatOpenAI({
-      modelName: 'gpt-4o',
+      modelName: 'gpt-4o-mini',
       temperature: 0.1,
-      maxTokens: 2000,
+      openAIApiKey: process.env.OPENAI_API_KEY
     });
 
     this.state = {
@@ -257,20 +224,74 @@ export class PflegedAgent {
       done: false,
       hasInteracted: false,
       debugLog: [],
-      hasRunToolChain: false,
-      userProfile: null
+      hasRunToolChain: false
+    };
+  }
+
+  // ============================================================================
+  // SESSION MANAGEMENT
+  // ============================================================================
+  
+  /**
+   * Generate a unique conversation ID for tracking
+   * @returns {string} Unique conversation identifier
+   */
+  private generateConversationId(): string {
+    return `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  /**
+   * Reset the agent state for a new conversation
+   * Clears all data and returns to initial upload state
+   */
+  reset(): void {
+    this.state = {
+      conversationId: this.generateConversationId(),
+      deductionAnswers: {},
+      currentQuestionIndex: 0,
+      isComplete: false,
+      messages: [],
+      step: 'upload',
+      done: false,
+      hasInteracted: false,
+      debugLog: [],
+      hasRunToolChain: false
     };
   }
 
   /**
-   * Generate a unique conversation ID for session tracking
+   * Reset agent state for filing another tax year
+   * Preserves conversation ID but clears all other state
    */
-  private generateConversationId(): string {
-    return `pfleged_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  private resetForNewYear(): void {
+    const conversationId = this.state.conversationId;
+    
+    this.state = {
+      conversationId,
+      userId: this.state.userId,
+      deductionAnswers: {},
+      currentQuestionIndex: 0,
+      isComplete: false,
+      messages: [],
+      step: 'upload',
+      done: false,
+      hasInteracted: false,
+      debugLog: [],
+      hasRunToolChain: false
+    };
+    
+    console.log('State reset for new year. Conversation ID preserved:', conversationId);
   }
 
+  // ============================================================================
+  // USER PROFILE MANAGEMENT
+  // ============================================================================
+  
   /**
    * Load user profile from Supabase for personalized advice
+   * @param userId - User ID to load profile for
+   * @param taxYear - Optional tax year for year-specific data
+   * @returns User profile or null if not found
    */
   async loadUserProfile(userId: string, taxYear?: string): Promise<UserProfile | null> {
     try {
@@ -298,6 +319,12 @@ export class PflegedAgent {
     }
   }
 
+
+
+  // ============================================================================
+  // LANGCHAIN TOOLS & AI ORCHESTRATION
+  // ============================================================================
+  
   /**
    * Create LangChain tools for the AI agent
    * 
@@ -815,6 +842,10 @@ When asking questions, consider the user's profile:
     ]);
   }
 
+  // ============================================================================
+  // MAIN AGENT EXECUTION
+  // ============================================================================
+  
   async initialize() {
     try {
       const tools = this.createTools();
@@ -1508,6 +1539,10 @@ ${explanation}
     return Object.values(this.state.deductionAnswers);
   }
 
+  // ============================================================================
+  // TAX CALCULATION & SUMMARY GENERATION
+  // ============================================================================
+  
   /**
    * Calculate tax summary with deductions and refund estimation
    * 
@@ -1698,51 +1733,10 @@ ${requiredDocs.map(doc => `- ${doc}`).join('\n')}${personalizedAdvice}
     return Math.max(0, taxableIncome * 0.15);
   }
 
-  /**
-   * Reset the agent state for a new conversation
-   * 
-   * Clears all data and returns to initial upload state
-   */
-  reset(): void {
-    this.state = {
-      conversationId: this.generateConversationId(),
-      deductionAnswers: {},
-      currentQuestionIndex: 0,
-      isComplete: false,
-      messages: [],
-      step: 'upload',
-      done: false,
-      hasInteracted: false, // Reset hasInteracted
-      debugLog: [], // Reset debugLog
-      hasRunToolChain: false // Reset hasRunToolChain
-    };
-  }
-
-  /**
-   * Reset agent state for filing another tax year
-   * 
-   * Preserves conversation ID but clears all other state
-   */
-  private resetForNewYear(): void {
-    const conversationId = this.state.conversationId;
-    
-    this.state = {
-      conversationId,
-      userId: this.state.userId,
-      deductionAnswers: {},
-      currentQuestionIndex: 0,
-      isComplete: false,
-      messages: [],
-      step: 'upload',
-      done: false,
-      hasInteracted: false,
-      debugLog: [],
-      hasRunToolChain: false
-    };
-    
-    console.log('State reset for new year. Conversation ID preserved:', conversationId);
-  }
-
+  // ============================================================================
+  // AI CONVERSATION HANDLING
+  // ============================================================================
+  
   /**
    * Handle AI-powered deduction conversation
    * 

@@ -5,12 +5,16 @@ export interface ExtractedData {
   address?: string;
   employer?: string;
   total_hours?: number;
-  gross_income?: number;
-  income_tax_paid?: number;
+  // Use correct German field names
+  bruttolohn?: number;       // Gross income (was gross_income)
+  lohnsteuer?: number;       // Income tax (was income_tax_paid)
   solidaritaetszuschlag?: number;
   year?: number;
   fallback?: string;
   error?: string;
+  // Legacy field support for backward compatibility
+  gross_income?: number;     // Legacy field - use bruttolohn instead
+  income_tax_paid?: number;  // Legacy field - use lohnsteuer instead
 }
 
 // Enhanced German tax document fields
@@ -181,10 +185,14 @@ export interface TaxThresholds {
 
 export interface UserData {
   year?: number;
-  gross_income?: number;
-  income_tax_paid?: number;
+  // Use correct German field names
+  bruttolohn?: number;       // Gross income (was gross_income)
+  lohnsteuer?: number;       // Income tax (was income_tax_paid)
   intended_year?: string;
   status?: UserStatus;
+  // Legacy field support for backward compatibility
+  gross_income?: number;     // Legacy field - use bruttolohn instead
+  income_tax_paid?: number;  // Legacy field - use lohnsteuer instead
   [key: string]: string | number | undefined;
 }
 

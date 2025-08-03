@@ -50,6 +50,8 @@ function AdvisorChat() {
   const [showExistingDataModal, setShowExistingDataModal] = useState(false)
   const [userId, setUserId] = useState<string>('')
   const [processingStatus, setProcessingStatus] = useState<string>('')
+  const [error, setError] = useState<string>('')
+  const [isAgentLoading, setIsAgentLoading] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
@@ -392,6 +394,10 @@ I'm ready to help you with your tax filing! What would you like to know?`
   const handleUserResponse = async (message: string) => {
     if (!message.trim()) return
 
+    // Clear any previous errors
+    setError('')
+    setIsAgentLoading(true)
+
     // Add user message to chat
     setState(prev => ({
       ...prev,
@@ -433,8 +439,8 @@ I'm ready to help you with your tax filing! What would you like to know?`
             await saveTaxFiling({
               user_id: userId,
               year: year,
-              gross_income: state.extractedData?.gross_income || 0,
-              income_tax_paid: 0,
+              gross_income: state.extractedData?.bruttolohn || state.extractedData?.gross_income || 0,
+              income_tax_paid: state.extractedData?.lohnsteuer || state.extractedData?.income_tax_paid || 0,
               employer: state.extractedData?.employer || 'Unknown',
               full_name: 'User',
               deductions: state.deductionAnswers
@@ -446,10 +452,13 @@ I'm ready to help you with your tax filing! What would you like to know?`
           }
         }
       } else {
-        throw new Error('Failed to get advisor response')
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || 'Failed to get advisor response')
       }
     } catch (error) {
       console.error('Error getting advisor response:', error)
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred'
+      setError(errorMessage)
       setState(prev => ({
         ...prev,
         messages: [...prev.messages, { 
@@ -457,6 +466,8 @@ I'm ready to help you with your tax filing! What would you like to know?`
           text: 'I apologize, but I encountered an error processing your request. Please try again or contact support if the problem persists.' 
         }]
       }))
+    } finally {
+      setIsAgentLoading(false)
     }
   }
 
@@ -484,7 +495,7 @@ I'm ready to help you with your tax filing! What would you like to know?`
       ...prev,
       step: 'advisor',
       extractedData: {
-        gross_income: existingFiling.totalIncome,
+        bruttolohn: existingFiling.totalIncome,
         employer: existingFiling.employer || 'Unknown',
         year: existingFiling.year
       },
@@ -551,7 +562,7 @@ I'm ready to help you with your tax filing! What would you like to know?`
 
           {state.step === 'advisor' && (
             <div className="flex flex-col h-[calc(100vh-300px)] min-h-[500px]">
-              {/* Tax Summary Card - Show real data from extractedData */}
+              {/* Tax Summary Card - Show only correct fields from extractedData */}
               {state.extractedData && (
                 <div className="mb-4 p-4 bg-white rounded-lg shadow border">
                   <h3 className="text-lg font-semibold text-gray-900 mb-3">📊 Tax Filing Summary</h3>
@@ -559,13 +570,13 @@ I'm ready to help you with your tax filing! What would you like to know?`
                     <div className="bg-blue-50 p-3 rounded">
                       <p className="text-sm text-blue-600 font-medium">Gross Income</p>
                       <p className="text-xl font-bold text-blue-900">
-                        €{formatCurrency(state.extractedData.gross_income || 0)}
+                        €{formatCurrency(state.extractedData.bruttolohn || 0)}
                       </p>
                     </div>
                     <div className="bg-red-50 p-3 rounded">
                       <p className="text-sm text-red-600 font-medium">Tax Paid</p>
                       <p className="text-xl font-bold text-red-900">
-                        €{formatCurrency(state.extractedData.income_tax_paid || 0)}
+                        €{formatCurrency(state.extractedData.lohnsteuer || 0)}
                       </p>
                     </div>
                   </div>
@@ -597,6 +608,32 @@ I'm ready to help you with your tax filing! What would you like to know?`
                     </div>
                   </div>
                 ))}
+                
+                {/* Error Display */}
+                {error && (
+                  <div className="flex justify-start">
+                    <div className="max-w-xs lg:max-w-md xl:max-w-lg px-4 py-2 rounded-lg bg-red-100 text-red-900 border border-red-200">
+                      <div className="flex items-center">
+                        <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                        </svg>
+                        <span className="text-sm font-medium">Error: {error}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Loading Indicator */}
+                {isAgentLoading && (
+                  <div className="flex justify-start">
+                    <div className="max-w-xs lg:max-w-md xl:max-w-lg px-4 py-2 rounded-lg bg-gray-100 text-gray-900">
+                      <div className="flex items-center">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
+                        <span className="text-sm">AI is thinking...</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
               
               <div className="border-t p-4 bg-white">
@@ -615,13 +652,15 @@ I'm ready to help you with your tax filing! What would you like to know?`
                     type="text"
                     name="message"
                     placeholder="Type your message..."
-                    className="flex-1 border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    disabled={isAgentLoading}
+                    className="flex-1 border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
                   />
                   <button
                     type="submit"
-                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                    disabled={isAgentLoading}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Send
+                    {isAgentLoading ? 'Sending...' : 'Send'}
                   </button>
                 </form>
               </div>
