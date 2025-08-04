@@ -31,6 +31,8 @@ const generateUserId = (): string => {
  * Get or create user profile from Supabase
  * @returns Promise resolving to UserProfile or null if error
  */
+// TODO: UNUSED - safe to delete after verification
+// This method is defined but never called from any component or API route
 export const getUserProfile = async (): Promise<UserProfile | null> => {
   const userId = generateUserId()
   
@@ -154,9 +156,11 @@ export const getTaxFilingByYear = async (userId: string, year: number): Promise<
 
 /**
  * Save user deduction data to Supabase
- * @param deduction - Deduction data to save
+ * @param deduction - User deduction data to save
  * @returns Promise resolving to saved UserDeduction or null if error
  */
+// TODO: UNUSED - safe to delete after verification
+// This method is defined but never called from any component or API route
 export const saveUserDeduction = async (deduction: Omit<UserDeduction, 'id' | 'created_at'>): Promise<UserDeduction | null> => {
   try {
     const { data, error } = await supabase
@@ -178,11 +182,13 @@ export const saveUserDeduction = async (deduction: Omit<UserDeduction, 'id' | 'c
 }
 
 /**
- * Get user deductions for a specific year
- * @param userId - User ID
- * @param year - Tax year
- * @returns Promise resolving to array of UserDeduction objects
+ * Get user deductions for a specific year from Supabase
+ * @param userId - User ID to get deductions for
+ * @param year - Tax year to get deductions for
+ * @returns Promise resolving to array of UserDeduction or empty array if error
  */
+// TODO: UNUSED - safe to delete after verification
+// This method is defined but never called from any component or API route
 export const getUserDeductionsByYear = async (userId: string, year: number): Promise<UserDeduction[]> => {
   try {
     const { data, error } = await supabase
@@ -205,10 +211,12 @@ export const getUserDeductionsByYear = async (userId: string, year: number): Pro
 
 /**
  * Update user profile data in Supabase
- * @param userId - User ID to update
+ * @param userId - User ID to update profile for
  * @param updates - Partial UserProfile object with fields to update
  * @returns Promise resolving to updated UserProfile or null if error
  */
+// TODO: UNUSED - safe to delete after verification
+// This method is defined but never called from any component or API route
 export const updateUserProfile = async (userId: string, updates: Partial<UserProfile>): Promise<UserProfile | null> => {
   try {
     const { data, error } = await supabase
@@ -314,10 +322,12 @@ export const getSuggestedDeductions = async (userId: string, year: number): Prom
 export class SupabaseService {
   /**
    * Get loss carryforward data for a user and year
-   * @param userId - User ID
-   * @param year - Tax year
-   * @returns Promise resolving to LossCarryforwardData or null if error
+   * @param userId - User ID to get loss carryforward for
+   * @param year - Tax year to get loss carryforward for
+   * @returns Promise resolving to LossCarryforwardData or null if not found
    */
+  // TODO: UNUSED - safe to delete after verification
+  // This method is defined but never called from any component or API route
   static async getLossCarryforward(userId: string, year: number): Promise<LossCarryforwardData | null> {
     try {
       const { data, error } = await supabase
@@ -354,12 +364,14 @@ export class SupabaseService {
   }
 
   /**
-   * Apply loss carryforward and update remaining amount
-   * @param userId - User ID
-   * @param year - Tax year
+   * Apply loss carryforward to reduce taxable income
+   * @param userId - User ID to apply loss carryforward for
+   * @param year - Tax year to apply loss carryforward for
    * @param amountToApply - Amount of loss carryforward to apply
    * @returns Promise resolving to object with applied and remaining amounts
    */
+  // TODO: UNUSED - safe to delete after verification
+  // This method is defined but never called from any component or API route
   static async applyLossCarryforward(
     userId: string, 
     year: number, 
@@ -401,14 +413,16 @@ export class SupabaseService {
   }
 
   /**
-   * Store complete tax filing result
-   * @param userId - User ID
-   * @param year - Tax year
-   * @param summary - Deduction summary
+   * Store tax filing result in Supabase
+   * @param userId - User ID to store result for
+   * @param year - Tax year for the filing
+   * @param summary - Deduction summary data
    * @param extractedData - Extracted tax data
    * @param agentNotes - Optional agent notes
    * @returns Promise resolving to TaxFilingResult
    */
+  // TODO: UNUSED - safe to delete after verification
+  // This method is defined but never called from any component or API route
   static async storeTaxFilingResult(
     userId: string,
     year: number,
@@ -456,10 +470,12 @@ export class SupabaseService {
   }
 
   /**
-   * Get user's tax filing history
-   * @param userId - User ID
+   * Get user's tax filing history from Supabase
+   * @param userId - User ID to get history for
    * @returns Promise resolving to array of TaxFilingResult objects
    */
+  // TODO: UNUSED - safe to delete after verification
+  // This method is defined but never called from any component or API route
   static async getUserTaxHistory(userId: string): Promise<TaxFilingResult[]> {
     try {
       const { data, error } = await supabase
@@ -481,12 +497,14 @@ export class SupabaseService {
   }
 
   /**
-   * Log errors to Supabase for monitoring
-   * @param conversationId - Conversation ID for tracking
-   * @param errorType - Type of error
-   * @param errorMessage - Error message
-   * @param additionalData - Additional error data
+   * Log error to Supabase for debugging and monitoring
+   * @param conversationId - Conversation ID where error occurred
+   * @param errorType - Type of error (e.g., 'agent_error', 'api_error')
+   * @param errorMessage - Error message to log
+   * @param additionalData - Optional additional data to log
    */
+  // TODO: UNUSED - safe to delete after verification
+  // This method is defined but never called from any component or API route
   static async logError(
     conversationId: string,
     errorType: string,
@@ -510,11 +528,13 @@ export class SupabaseService {
   }
 
   /**
-   * Store conversation state for resuming sessions
-   * @param conversationId - Conversation ID
-   * @param userId - User ID
-   * @param state - Conversation state data
+   * Store conversation state in Supabase for persistence
+   * @param conversationId - Conversation ID to store state for
+   * @param userId - User ID associated with conversation
+   * @param state - Conversation state object to store
    */
+  // TODO: UNUSED - safe to delete after verification
+  // This method is defined but never called from any component or API route
   static async storeConversationState(
     conversationId: string,
     userId: string,
@@ -536,10 +556,12 @@ export class SupabaseService {
   }
 
   /**
-   * Retrieve conversation state for resuming sessions
-   * @param conversationId - Conversation ID
-   * @returns Promise resolving to conversation state or null
+   * Get conversation state from Supabase for resuming sessions
+   * @param conversationId - Conversation ID to get state for
+   * @returns Promise resolving to conversation state or null if not found
    */
+  // TODO: UNUSED - safe to delete after verification
+  // This method is defined but never called from any component or API route
   static async getConversationState(
     conversationId: string
   ): Promise<any | null> {

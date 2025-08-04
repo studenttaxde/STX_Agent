@@ -184,6 +184,8 @@ async function processPDFFiles(pdfFiles: File[], taxYear: number) {
   return { aggregatedData, extractedFields };
 }
 
+// TODO: UNUSED - safe to delete after verification
+// This route exists but is not called from any frontend component
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();

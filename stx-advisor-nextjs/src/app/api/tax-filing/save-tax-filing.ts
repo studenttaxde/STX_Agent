@@ -1,6 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { saveTaxFiling } from '@/services/supabaseService'
+import { NextRequest, NextResponse } from 'next/server';
+import { saveTaxFiling } from '@/services/supabaseService';
 
+// TODO: UNUSED - safe to delete after verification
+// This API route exists but is not called from any frontend component
 export async function POST(request: NextRequest) {
   try {
     const data = await request.json()

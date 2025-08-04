@@ -12,7 +12,11 @@ import {
   hasExistingData 
 } from '@/services/supabaseService'
 
-
+// TODO: UNUSED - safe to delete after verification
+// These components exist but are not used in the main flow:
+// - ClarificationQuestions.tsx
+// - SummaryOutput.tsx
+// - DeductionReview.tsx
 
 
 // Generate a simple user ID based on browser fingerprint or create a new one
@@ -436,6 +440,8 @@ I'm ready to help you with your tax filing! What would you like to know?`
           try {
             const year = state.extractedData?.year || new Date().getFullYear()
             
+            // TODO: FIX - Should use API route instead of direct service call
+            // Currently calling service directly, should use /api/tax-filing/save-tax-filing
             await saveTaxFiling({
               user_id: userId,
               year: year,

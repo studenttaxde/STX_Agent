@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { RunAgentSchema } from '@/types/validation';
-import { handleRunAgent } from '@/services/agentService';
+import { handleRunAgent, logAgentError } from '@/services/agentService';
 import { handleAgentError } from '@/utils/errorHandler';
+
+// TODO: UNUSED - safe to delete after verification
+// This route exists but is not called from any frontend component
 
 export const maxDuration = 30; // 30 seconds for agent processing
 

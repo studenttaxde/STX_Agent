@@ -10,6 +10,9 @@ import {
 } from '@/services/agentService';
 import { handleAgentError } from '@/utils/errorHandler';
 
+// TODO: DUPLICATE with route.ts in same directory - safe to delete after verification
+// This route is redundant as route.ts handles the same functionality
+
 export const maxDuration = 30; // 30 seconds for agent processing
 
 export async function POST(request: NextRequest) {

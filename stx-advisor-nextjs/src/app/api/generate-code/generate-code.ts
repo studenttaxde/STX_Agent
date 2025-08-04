@@ -1,4 +1,7 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server';
+
+// TODO: UNUSED - safe to delete after verification
+// This API route exists but is not called from any frontend component
 import OpenAI from 'openai'
 
 const openai = new OpenAI({
