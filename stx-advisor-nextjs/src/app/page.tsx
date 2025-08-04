@@ -52,6 +52,16 @@ function AdvisorChat() {
   const [selectedEmploymentStatus, setSelectedEmploymentStatus] = useState<EmploymentStatus | null>(null)
   const [showEmploymentSelector, setShowEmploymentSelector] = useState(false)
 
+  // Debug: Log state changes
+  useEffect(() => {
+    console.log('State updated:', {
+      messages: state.messages.length,
+      step: state.step,
+      deductionFlow: state.deductionFlow,
+      currentQuestionIndex: state.currentQuestionIndex
+    })
+  }, [state.messages, state.step, state.deductionFlow, state.currentQuestionIndex])
+
   const fileInputRef = useRef<HTMLInputElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
 
@@ -640,6 +650,7 @@ function AdvisorChat() {
               )}
               
               <div className="flex-1 overflow-y-auto space-y-4 mb-4 p-4" ref={chatContainerRef}>
+                {(() => { console.log('Rendering messages:', state.messages.length, state.messages); return null; })()}
                 {state.messages.map((message, index) => (
                   <div
                     key={index}
