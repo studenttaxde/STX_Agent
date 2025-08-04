@@ -10,7 +10,7 @@ export const maxDuration = 10 // Netlify limit - 10 seconds maximum
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
-    const files = formData.getAll('files') as File[];
+    const files = formData.getAll('files') as any[];
 
     if (!files || files.length === 0) {
       return NextResponse.json({ error: 'No files provided' }, { status: 400 });
@@ -27,9 +27,9 @@ export async function POST(request: NextRequest) {
 
     // Check file sizes to prevent timeouts
     for (const file of files) {
-      if (file.size > 3 * 1024 * 1024) { // 3MB limit for faster processing
+      if (file.size && file.size > 3 * 1024 * 1024) { // 3MB limit for faster processing
         return NextResponse.json({ 
-          error: `File ${file.name} is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum file size is 3MB to prevent timeouts.` 
+          error: `File ${file.name || 'unknown'} is too large (${(file.size / 1024 / 1024).toFixed(1)}MB). Maximum file size is 3MB to prevent timeouts.` 
         }, { status: 400 });
       }
     }
