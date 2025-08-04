@@ -47,20 +47,6 @@ export const AgentRespondSchema = z.object({
   multiPDFData: z.any().optional(),
 });
 
-export const RunAgentSchema = z.object({
-  userId: z.string().min(1, 'User ID is required'),
-  input: z.string().min(1, 'Input is required'),
-  conversationId: z.string().optional(),
-  extractedData: z.any().optional(),
-  deductionAnswers: z.record(z.any()).optional(),
-});
-
-export const AutodetectSchema = z.object({
-  statusKey: z.enum(['bachelor', 'master', 'new_employee', 'full_time']),
-  taxYear: z.string().optional(),
-  pdfs: z.array(z.instanceof(File)).min(1, 'At least one PDF file is required'),
-});
-
 // Agent Response Schemas
 export const AgentResponseSchema = z.object({
   success: z.boolean(),
@@ -72,44 +58,7 @@ export const AgentResponseSchema = z.object({
   step: z.string().optional(),
 });
 
-export const RunAgentResponseSchema = z.object({
-  success: z.boolean(),
-  result: z.string(),
-  state: z.object({
-    conversationId: z.string(),
-    step: z.string(),
-    isComplete: z.boolean(),
-    currentQuestionIndex: z.number(),
-    hasExtractedData: z.boolean(),
-    hasDeductionFlow: z.boolean(),
-    messagesCount: z.number(),
-    done: z.boolean(),
-  }),
-});
-
-export const AutodetectResponseSchema = z.object({
-  deductions: z.array(z.object({
-    category: z.string(),
-    basis: z.number(),
-    cap: z.number().nullable(),
-    deductible: z.number(),
-    label: z.string().optional(),
-    rationale: z.string().optional(),
-  })),
-  extractedFields: z.any(),
-  taxYear: z.number(),
-  summary: z.object({
-    totalIncome: z.number(),
-    basicAllowance: z.number(),
-    isBelowThreshold: z.boolean(),
-  }),
-});
-
 // Type exports
 export type AgentInitializeRequest = z.infer<typeof AgentInitializeSchema>;
 export type AgentRespondRequest = z.infer<typeof AgentRespondSchema>;
-export type RunAgentRequest = z.infer<typeof RunAgentSchema>;
-export type AutodetectRequest = z.infer<typeof AutodetectSchema>;
-export type AgentResponse = z.infer<typeof AgentResponseSchema>;
-export type RunAgentResponse = z.infer<typeof RunAgentResponseSchema>;
-export type AutodetectResponse = z.infer<typeof AutodetectResponseSchema>; 
+export type AgentResponse = z.infer<typeof AgentResponseSchema>; 

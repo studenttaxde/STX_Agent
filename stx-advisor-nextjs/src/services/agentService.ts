@@ -1,12 +1,9 @@
 import { PflegedAgent } from '@/agent/taxAdvisorAgent';
-import { SupabaseService } from '@/services/supabaseService';
 import { ExtractedData } from '@/types';
 import { 
   AgentInitializeRequest, 
-  AgentRespondRequest, 
-  RunAgentRequest,
-  AgentResponse,
-  RunAgentResponse 
+  AgentRespondRequest,
+  AgentResponse
 } from '@/types/validation';
 import { 
   createAgentError, 
@@ -167,102 +164,13 @@ export async function handleAgentRespond(request: AgentRespondRequest): Promise<
   }, context, 25000); // 25 second timeout
 }
 
-/**
- * Handle run agent request (for direct agent execution)
- */
-export async function handleRunAgent(request: RunAgentRequest): Promise<RunAgentResponse> {
-  const { userId, input, conversationId, extractedData, deductionAnswers } = request;
-
-  const context: ErrorContext = {
-    endpoint: '/api/agent/run-agent',
-    userId,
-    sessionId: conversationId
-  };
-
-  return withErrorHandling(async () => {
-    validateRequiredFields({ userId, input }, ['userId', 'input'], context);
-
-    console.log('Starting Pfleged agent execution:', {
-      userId,
-      conversationId,
-      inputLength: input.length,
-      hasExtractedData: !!extractedData,
-      hasDeductionAnswers: !!deductionAnswers
-    });
-
-    // Initialize agent
-    const agent = new PflegedAgent();
-
-    // Set user ID
-    agent.setUserId(userId);
-
-    // Set conversation ID if provided
-    if (conversationId) {
-      console.log('Using provided conversation ID:', conversationId);
-    }
-
-    // Set extracted data if provided
-    if (extractedData) {
-      agent.setExtractedData(extractedData);
-      console.log('Set extracted data for agent');
-    }
-
-    // Add deduction answers if provided
-    if (deductionAnswers) {
-      Object.entries(deductionAnswers).forEach(([questionId, answer]) => {
-        agent.addDeductionAnswer(questionId, answer);
-      });
-      console.log('Added deduction answers to agent');
-    }
-
-    // Run agent
-    const result = await agent.runAgent(input);
-
-    // Get agent state
-    const state = agent.getState();
-
-    // Store conversation state in Supabase
-    await SupabaseService.storeConversationState(
-      state.conversationId,
-      userId,
-      {
-        ...state,
-        lastUpdated: new Date().toISOString()
-      }
-    );
-
-    console.log('Agent execution completed successfully', {
-      conversationId: state.conversationId,
-      step: state.step,
-      isComplete: state.isComplete,
-      messagesCount: state.messages.length
-    });
-
-    return {
-      success: true,
-      result,
-      state: {
-        conversationId: state.conversationId,
-        step: state.step,
-        isComplete: state.isComplete,
-        currentQuestionIndex: state.currentQuestionIndex,
-        hasExtractedData: !!state.extractedData,
-        hasDeductionFlow: !!state.deductionFlow,
-        messagesCount: state.messages.length,
-        done: state.done
-      }
-    };
-  }, context, 25000); // 25 second timeout
-}
-
-/**
- * Log error to Supabase (deprecated - use errorHandler.logError instead)
- */
-export async function logAgentError(
-  conversationId: string,
-  errorType: string,
-  error: Error | string,
-  context: Record<string, any> = {}
-): Promise<void> {
-  await logError(conversationId, errorType, error, context);
-} 
+// TODO: UNUSED - safe to delete after verification
+// This function is just a wrapper around errorHandler.logError and is not used
+// export async function logAgentError(
+//   conversationId: string,
+//   errorType: string,
+//   error: Error | string,
+//   context: Record<string, any> = {}
+// ): Promise<void> {
+//   await logError(conversationId, errorType, error, context);
+// } 
