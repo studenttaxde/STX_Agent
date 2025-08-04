@@ -90,12 +90,19 @@ export async function handleAgentInitialize(request: AgentInitializeRequest): Pr
     
     console.log('Initial message received from Pfleged agent:', initialMessage);
     
+    // Check if employment status selector should be shown
+    const needsEmploymentStatus = initialMessage && 
+      (initialMessage.includes('employment status') || 
+       initialMessage.includes('Please select') ||
+       initialMessage.includes('Before we begin deductions'))
+    
     return {
       success: true,
       message: initialMessage,
       done: false,
       deduction_flow: null,
-      current_question_index: 0
+      current_question_index: 0,
+      showEmploymentSelector: needsEmploymentStatus
     };
   }, context, 25000); // 25 second timeout
 }
@@ -152,6 +159,13 @@ export async function handleAgentRespond(request: AgentRespondRequest): Promise<
     // Get current state
     const state = agent.getState();
     
+    // Check if employment status selector should be shown
+    const needsEmploymentStatus = nextMessage && 
+      (nextMessage.includes('employment status') || 
+       nextMessage.includes('Please select') ||
+       nextMessage.includes('Before we begin deductions') ||
+       nextMessage.includes('I need to set up your deduction flow'))
+    
     return {
       success: true,
       message: nextMessage,
@@ -159,7 +173,8 @@ export async function handleAgentRespond(request: AgentRespondRequest): Promise<
       deduction_flow: state.deductionFlow,
       current_question_index: state.currentQuestionIndex,
       conversation_id: state.conversationId,
-      step: state.step
+      step: state.step,
+      showEmploymentSelector: needsEmploymentStatus
     };
   }, context, 25000); // 25 second timeout
 }
@@ -203,7 +218,8 @@ export async function handleAgentEmploymentStatus(request: {
       deduction_flow: state.deductionFlow,
       current_question_index: state.currentQuestionIndex,
       conversation_id: state.conversationId,
-      step: state.step
+      step: state.step,
+      showEmploymentSelector: false // Employment status already selected
     };
   }, context, 25000); // 25 second timeout
 }

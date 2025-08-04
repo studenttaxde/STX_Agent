@@ -320,13 +320,7 @@ function AdvisorChat() {
           console.log('Advisor response data:', advisorResponseData)
           
           // Check if the agent is asking for employment status
-          const needsEmploymentStatus = advisorResponseData.message && 
-            (advisorResponseData.message.includes('employment status') || 
-             advisorResponseData.message.includes('Please select') ||
-             advisorResponseData.message.includes('bachelor') ||
-             advisorResponseData.message.includes('master'))
-          
-          if (needsEmploymentStatus) {
+          if (advisorResponseData.showEmploymentSelector) {
             setShowEmploymentSelector(true)
           }
           
@@ -403,6 +397,11 @@ function AdvisorChat() {
           currentQuestionIndex: data.currentQuestionIndex || prev.currentQuestionIndex,
           taxCalculation: data.taxCalculation || prev.taxCalculation
         }))
+
+        // Check if employment status selector should be shown
+        if (data.showEmploymentSelector) {
+          setShowEmploymentSelector(true)
+        }
 
         // If the advisor is done, save the filing
         if (data.done && data.taxCalculation) {

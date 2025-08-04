@@ -880,6 +880,17 @@ When asking questions, consider the user's profile:
       console.log('Agent runAgent called with input:', input);
       console.log('Current state:', this.state);
       
+      // GATE: If above threshold but no employment status selected, require employment status first
+      if (this.state.extractedData && !this.state.deductionFlow) {
+        const { bruttolohn, gross_income, year } = this.state.extractedData;
+        const actualGrossIncome = bruttolohn || gross_income || 0;
+        const thresholdResult = this.checkTaxThreshold(actualGrossIncome, year);
+        
+        if (thresholdResult && !thresholdResult.isBelowThreshold) {
+          return `I need to set up your deduction flow first. Please select your employment status below.`;
+        }
+      }
+      
       // Check if user is asking for explanation (only if input is not empty)
       if (input && input.trim()) {
         const explanationKeywords = [
@@ -1023,7 +1034,7 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
 
 `;
 
-    // If below threshold, show full refund message
+    // If below threshold, show full refund message and STOP
     if (thresholdResult && thresholdResult.isBelowThreshold) {
       response += `🎉 **Great news!** Your income (€${Number(actualGrossIncome).toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is below the tax-free threshold (€${thresholdResult.threshold.toLocaleString('de-DE')}) for ${year}.
 
@@ -1034,20 +1045,17 @@ Would you like me to help you file for another year?`;
       // Mark as complete for below-threshold cases
       this.state.step = 'summary';
       this.state.isComplete = true;
+      this.state.done = true;
     } else {
-      // If above threshold, ask for employment status
-      response += `Since your income exceeds the tax-free threshold, let's check for deductible expenses to reduce your taxable income.
+      // If above threshold, ONLY ask for employment status - NO refund calculations yet
+      response += `You're above the tax-free threshold (€${thresholdResult?.threshold.toLocaleString('de-DE') || 'unknown'}) for ${year}.
 
-Please select your employment status for ${year}:
-1. **bachelor** (Bachelor's student)
-2. **master** (Master's student)  
-3. **new_employee** (Started job after graduation)
-4. **full_time** (Full-time employee)
-
-Which category applies to you?`;
+Before we begin deductions, please select your employment status below.`;
       
       // Set step to questions to await employment status
       this.state.step = 'questions';
+      // Ensure deductionFlow is undefined until employment status is selected
+      this.state.deductionFlow = undefined;
     }
 
     return response;
@@ -1074,18 +1082,16 @@ Which category applies to you?`;
         if (thresholdResult && thresholdResult.isBelowThreshold) {
           this.state.step = 'summary';
           this.state.isComplete = true;
+          this.state.done = true;
           return `Perfect! Since your income (€${Number(actualGrossIncome).toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is below the tax-free threshold (€${thresholdResult.threshold.toLocaleString('de-DE')}) for ${year}, you are eligible for a **full refund** of €${Number(actualTaxPaid).toLocaleString('de-DE', { minimumFractionDigits: 2 })}!
 
 Would you like me to help you file for another year?`;
         } else {
           this.state.step = 'questions';
-          return `Since your income exceeds the tax-free threshold, let's check for deductible expenses to reduce your taxable income.
+          this.state.deductionFlow = undefined;
+          return `You're above the tax-free threshold (€${thresholdResult?.threshold.toLocaleString('de-DE') || 'unknown'}) for ${year}.
 
-Please select your status for the year:
-1. **bachelor** (Bachelor's student)
-2. **master** (Master's student)  
-3. **new_employee** (Started job after graduation)
-4. **full_time** (Full-time employee)`;
+Before we begin deductions, please select your employment status below.`;
         }
       } else if (this.state.step === 'questions') {
         // Handle deduction question responses
