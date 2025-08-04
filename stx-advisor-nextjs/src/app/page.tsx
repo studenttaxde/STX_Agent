@@ -405,8 +405,8 @@ function AdvisorChat() {
             ...prev,
             messages: [...prev.messages, { sender: 'assistant' as const, text: data.message }],
             done: data.done || false,
-            deductionFlow: data.deductionFlow || prev.deductionFlow,
-            currentQuestionIndex: data.currentQuestionIndex || prev.currentQuestionIndex,
+            deductionFlow: data.deduction_flow || prev.deductionFlow,
+            currentQuestionIndex: data.current_question_index || prev.currentQuestionIndex,
             taxCalculation: data.taxCalculation || prev.taxCalculation,
             step: data.step || prev.step
           };
@@ -499,8 +499,8 @@ function AdvisorChat() {
             ...prev,
             messages: [...prev.messages, { sender: 'assistant' as const, text: data.message }],
             done: data.done || false,
-            deductionFlow: data.deductionFlow || prev.deductionFlow,
-            currentQuestionIndex: data.currentQuestionIndex || prev.currentQuestionIndex,
+            deductionFlow: data.deduction_flow || prev.deductionFlow,
+            currentQuestionIndex: data.current_question_index || prev.currentQuestionIndex,
             taxCalculation: data.taxCalculation || prev.taxCalculation,
             step: data.step || prev.step
           };
