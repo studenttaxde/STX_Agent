@@ -994,19 +994,44 @@ When asking questions, consider the user's profile:
       return "I don't see any tax data to analyze. Please upload your tax documents first.";
     }
 
-    const { full_name, employer, gross_income, income_tax_paid, solidaritaetszuschlag, year } = this.state.extractedData;
+    const { full_name, employer, gross_income, income_tax_paid, solidaritaetszuschlag, year, bruttolohn, lohnsteuer } = this.state.extractedData;
+    
+    // Use correct field names for calculations
+    const actualGrossIncome = bruttolohn || gross_income || 0;
+    const actualTaxPaid = lohnsteuer || income_tax_paid || 0;
+    
+    // Check tax threshold first
+    const thresholdResult = this.checkTaxThreshold(actualGrossIncome, year);
     
     let response = `Here's what I found from your documents:
 
 👤 **Name:** ${full_name || "N/A"}
 🏢 **Employer:** ${employer || "N/A"}
-💶 **Gross Income:** €${Number(gross_income || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
-💰 **Lohnsteuer Paid:** €${Number(income_tax_paid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+💶 **Gross Income:** €${Number(actualGrossIncome).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+💰 **Lohnsteuer Paid:** €${Number(actualTaxPaid).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
 ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszuschlag).toLocaleString('de-DE', { minimumFractionDigits: 2 })}\n` : ''}📅 **Detected Tax Year:** ${year || "Not specified"}
 
-Can you please confirm that the tax year you want to file is ${year}? (yes/no)
+`;
 
-If this is correct, I'll help you with your tax filing process. If not, please upload the correct PDF for the year you want to file.`;
+    // If below threshold, show full refund message
+    if (thresholdResult && thresholdResult.isBelowThreshold) {
+      response += `🎉 **Great news!** Your income (€${Number(actualGrossIncome).toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is below the tax-free threshold (€${thresholdResult.threshold.toLocaleString('de-DE')}) for ${year}.
+
+You are eligible for a **full refund** of €${Number(actualTaxPaid).toLocaleString('de-DE', { minimumFractionDigits: 2 })}!
+
+Would you like me to help you file for another year?`;
+    } else {
+      // If above threshold, ask for employment status
+      response += `Since your income exceeds the tax-free threshold, let's check for deductible expenses to reduce your taxable income.
+
+Please select your employment status for ${year}:
+1. **bachelor** (Bachelor's student)
+2. **master** (Master's student)  
+3. **new_employee** (Started job after graduation)
+4. **full_time** (Full-time employee)
+
+Which category applies to you?`;
+    }
 
     return response;
   }
@@ -1023,14 +1048,16 @@ If this is correct, I'll help you with your tax filing process. If not, please u
       // If we're still in the initial confirmation step
       if (this.state.step === 'extract' || this.state.step === 'confirm') {
         this.state.step = 'questions';
-        const { year, gross_income } = this.state.extractedData;
+        const { year, gross_income, bruttolohn, income_tax_paid, lohnsteuer } = this.state.extractedData;
+        const actualGrossIncome = bruttolohn || gross_income || 0;
+        const actualTaxPaid = lohnsteuer || income_tax_paid || 0;
         
         // Use unified checkTaxThreshold method
-        const thresholdResult = this.checkTaxThreshold(gross_income, year);
+        const thresholdResult = this.checkTaxThreshold(actualGrossIncome, year);
         
         if (thresholdResult && thresholdResult.isBelowThreshold) {
           this.state.step = 'summary';
-          return `Perfect! Since your income (€${Number(gross_income).toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is below the tax-free threshold (€${thresholdResult.threshold.toLocaleString('de-DE')}) for ${year}, you are eligible for a **full refund** of your tax paid.
+          return `Perfect! Since your income (€${Number(actualGrossIncome).toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is below the tax-free threshold (€${thresholdResult.threshold.toLocaleString('de-DE')}) for ${year}, you are eligible for a **full refund** of €${Number(actualTaxPaid).toLocaleString('de-DE', { minimumFractionDigits: 2 })}!
 
 Would you like me to help you file for another year?`;
         } else {
@@ -1059,13 +1086,17 @@ Please select your status for the year:
       this.state.step = 'questions';
       this.state.currentQuestionIndex = 0;
       
+      const { bruttolohn, gross_income, lohnsteuer, income_tax_paid } = this.state.extractedData || {};
+      const actualGrossIncome = bruttolohn || gross_income || 0;
+      const actualTaxPaid = lohnsteuer || income_tax_paid || 0;
+      
       return `Perfect! I've set your status as: **${status.toUpperCase()}**
 
 Based on your extracted data, here's your tax summary:
 
 **Tax Year:** ${this.state.extractedData?.year}
-**Gross Income:** €${Number(this.state.extractedData?.gross_income || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
-**Tax Paid:** €${Number(this.state.extractedData?.income_tax_paid || 0).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+**Gross Income:** €${Number(actualGrossIncome).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+**Tax Paid:** €${Number(actualTaxPaid).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
 
 I'm now ready to help you with your tax filing. Would you like to proceed with deductions? (yes/no)`;
     } else if (lastUserMessage.includes('proceed') || lastUserMessage.includes('deductions')) {
@@ -1273,7 +1304,7 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
     }
 
     const checkYear = year || this.state.extractedData?.year || 2021;
-    const checkTaxableIncome = taxableIncome ?? (this.state.extractedData?.gross_income || 0);
+    const checkTaxableIncome = taxableIncome ?? (this.state.extractedData?.bruttolohn || this.state.extractedData?.gross_income || 0);
     const threshold = PflegedAgent.TAX_FREE_THRESHOLDS[checkYear] || 10908;
     const isBelowThreshold = checkTaxableIncome <= threshold;
     
@@ -1563,8 +1594,10 @@ ${explanation}
       .filter(a => a.answer)
       .reduce((sum, a) => sum + (a.amount || 0), 0);
 
-    const { year, gross_income, income_tax_paid } = this.state.extractedData;
-    const taxableIncome = Math.max(0, (gross_income || 0) - totalDeductions);
+    const { year, gross_income, income_tax_paid, bruttolohn, lohnsteuer } = this.state.extractedData;
+    const actualGrossIncome = bruttolohn || gross_income || 0;
+    const actualTaxPaid = lohnsteuer || income_tax_paid || 0;
+    const taxableIncome = Math.max(0, actualGrossIncome - totalDeductions);
     const threshold = year ? PflegedAgent.TAX_FREE_THRESHOLDS[year] : 10908;
     
     // Check for Verlustvortrag (loss carryforward)
@@ -1574,19 +1607,19 @@ ${explanation}
     // Calculate refund
     let refund = 0;
     if (finalTaxableIncome <= threshold) {
-      refund = income_tax_paid || 0; // Full refund when below threshold
+      refund = actualTaxPaid; // Full refund when below threshold
     } else {
       const estimatedTax = this.calculateGermanTax(finalTaxableIncome, year);
-      refund = Math.max(0, (income_tax_paid || 0) - estimatedTax);
+      refund = Math.max(0, actualTaxPaid - estimatedTax);
     }
 
     // Create calculation object
     const calculation: TaxCalculation = {
-      grossIncome: gross_income || 0,
+      grossIncome: actualGrossIncome,
       totalDeductions,
       taxableIncome: finalTaxableIncome,
       estimatedTax: finalTaxableIncome * 0.15,
-      taxPaid: income_tax_paid || 0,
+      taxPaid: actualTaxPaid,
       refund,
       year: year || 0
     };

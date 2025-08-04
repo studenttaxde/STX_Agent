@@ -288,8 +288,10 @@ function AdvisorChat() {
         step: 'advisor',
         extractedData: {
           ...aggregatedData,
-          gross_income: aggregatedData.totalIncome,
-          income_tax_paid: aggregatedData.lohnsteuer || 0,
+          bruttolohn: aggregatedData.totalIncome,        // Add this for UI display
+          lohnsteuer: aggregatedData.lohnsteuer || 0,   // Add this for UI display
+          gross_income: aggregatedData.totalIncome,      // Legacy field
+          income_tax_paid: aggregatedData.lohnsteuer || 0, // Legacy field
           year: safeYear
         },
         multiPDFData: {
@@ -343,26 +345,10 @@ function AdvisorChat() {
           console.log('Advisor initialized successfully')
           console.log('Advisor response data:', advisorResponseData)
           
-                  // Add success message with extracted data
-        const successMessage = `✅ Successfully processed ${successfulResults.length} document(s)!
-
-📊 **Extracted Tax Data:**
-• Total Income: €${formatCurrency(aggregatedData.totalIncome)}
-• Income Tax Paid: €${formatCurrency(aggregatedData.lohnsteuer)}
-• Solidarity Tax: €${formatCurrency(aggregatedData.solidaritaetszuschlag)}
-• Employers: ${aggregatedData.employers.join(', ') || 'Not specified'}
-• Year: ${safeYear}
-
-I'm ready to help you with your tax filing! What would you like to know?`
-
-        // Add the success message and advisor's response
+                  // Only add the advisor's response, not a redundant success message
         setState(prev => ({
           ...prev,
           messages: [
-            {
-              sender: 'assistant',
-              text: successMessage
-            },
             {
               sender: 'assistant',
               text: advisorResponseData.message
