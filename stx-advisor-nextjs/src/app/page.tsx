@@ -388,16 +388,21 @@ function AdvisorChat() {
 
       if (response.ok) {
         const data = await response.json()
+        console.log('User response data:', data)
         
-        setState(prev => ({
-          ...prev,
-          messages: [...prev.messages, { sender: 'assistant', text: data.message }],
-          done: data.done || false,
-          deductionFlow: data.deductionFlow || prev.deductionFlow,
-          currentQuestionIndex: data.currentQuestionIndex || prev.currentQuestionIndex,
-          taxCalculation: data.taxCalculation || prev.taxCalculation,
-          step: data.step || prev.step
-        }))
+        setState(prev => {
+          const newState: TaxAdvisorState = {
+            ...prev,
+            messages: [...prev.messages, { sender: 'assistant' as const, text: data.message }],
+            done: data.done || false,
+            deductionFlow: data.deductionFlow || prev.deductionFlow,
+            currentQuestionIndex: data.currentQuestionIndex || prev.currentQuestionIndex,
+            taxCalculation: data.taxCalculation || prev.taxCalculation,
+            step: data.step || prev.step
+          };
+          console.log('Updated state in handleUserResponse:', newState);
+          return newState;
+        })
 
         // Check if employment status selector should be shown
         if (data.showEmploymentSelector) {
@@ -477,16 +482,21 @@ function AdvisorChat() {
 
       if (response.ok) {
         const data = await response.json()
+        console.log('Employment status response data:', data)
         
-        setState(prev => ({
-          ...prev,
-          messages: [...prev.messages, { sender: 'assistant', text: data.message }],
-          done: data.done || false,
-          deductionFlow: data.deductionFlow || prev.deductionFlow,
-          currentQuestionIndex: data.currentQuestionIndex || prev.currentQuestionIndex,
-          taxCalculation: data.taxCalculation || prev.taxCalculation,
-          step: data.step || prev.step
-        }))
+        setState(prev => {
+          const newState: TaxAdvisorState = {
+            ...prev,
+            messages: [...prev.messages, { sender: 'assistant' as const, text: data.message }],
+            done: data.done || false,
+            deductionFlow: data.deductionFlow || prev.deductionFlow,
+            currentQuestionIndex: data.currentQuestionIndex || prev.currentQuestionIndex,
+            taxCalculation: data.taxCalculation || prev.taxCalculation,
+            step: data.step || prev.step
+          };
+          console.log('Updated state in handleEmploymentStatusSelect:', newState);
+          return newState;
+        })
       } else {
         const errorData = await response.json().catch(() => ({}))
         throw new Error(errorData.error || 'Failed to process employment status')

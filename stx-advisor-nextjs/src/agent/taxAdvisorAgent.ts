@@ -1215,20 +1215,32 @@ Would you like me to help you file for another year?`;
   }
 
   private askNextDeductionQuestion(): string {
+    console.log('askNextDeductionQuestion called');
+    console.log('Current state:', {
+      deductionFlow: this.state.deductionFlow,
+      currentQuestionIndex: this.state.currentQuestionIndex,
+      step: this.state.step
+    });
+    
     if (!this.state.deductionFlow) {
+      console.log('No deduction flow set');
       return "I need to set up your deduction flow first. Please select your employment status.";
     }
 
     const { questions, order } = this.state.deductionFlow;
+    console.log('Deduction flow:', { questions: questions.length, order });
     
     if (this.state.currentQuestionIndex >= order.length) {
       // All questions answered, proceed to calculation
       this.state.step = 'calculate';
+      console.log('All questions answered, proceeding to calculation');
       return "Great! I have all the information I need. Let me calculate your tax refund...";
     }
 
     const questionId = order[this.state.currentQuestionIndex];
     const question = questions.find(q => q.id === questionId);
+    
+    console.log('Looking for question:', { questionId, currentQuestionIndex: this.state.currentQuestionIndex });
     
     if (!question) {
       console.error('Question not found:', questionId);
@@ -1237,8 +1249,10 @@ Would you like me to help you file for another year?`;
 
     // Add transition message if not the first question
     const transition = this.state.currentQuestionIndex > 0 ? "Got it. Let's move to the next deduction...\n\n" : "";
+    const result = `${transition}${question.question}`;
     
-    return `${transition}${question.question}`;
+    console.log('Returning question:', result);
+    return result;
   }
 
   private processDeductionAnswer(input: string, question: DeductionQuestion): DeductionAnswer {
@@ -1617,11 +1631,14 @@ ${explanation}
    */
   handleEmploymentStatusSelection(status: UserStatus): string {
     console.log('Employment status selected:', status);
+    console.log('Current state before update:', this.state);
     
     // Set the deduction flow based on status
     this.state.deductionFlow = this.deductionFlowMap[status];
     this.state.step = 'questions';
     this.state.currentQuestionIndex = 0;
+    
+    console.log('State after update:', this.state);
     
     // Get status display name
     const statusDisplayNames = {
@@ -1635,7 +1652,10 @@ ${explanation}
     const actualGrossIncome = bruttolohn || gross_income || 0;
     const actualTaxPaid = lohnsteuer || income_tax_paid || 0;
     
-    return `Perfect! I've set your status as: **${statusDisplayNames[status]}**
+    const nextQuestion = this.askNextDeductionQuestion();
+    console.log('Next question:', nextQuestion);
+    
+    const response = `Perfect! I've set your status as: **${statusDisplayNames[status]}**
 
 Based on your extracted data, here's your tax summary:
 
@@ -1645,7 +1665,10 @@ Based on your extracted data, here's your tax summary:
 
 Let's start with the deduction questions:
 
-${this.askNextDeductionQuestion()}`;
+${nextQuestion}`;
+    
+    console.log('Employment status response:', response);
+    return response;
   }
 
   /**
