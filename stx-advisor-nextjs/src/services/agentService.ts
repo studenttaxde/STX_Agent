@@ -174,6 +174,8 @@ export async function handleAgentRespond(request: AgentRespondRequest): Promise<
       current_question_index: state.currentQuestionIndex,
       conversation_id: state.conversationId,
       step: state.step,
+      year_confirmed: state.yearConfirmed,
+      has_run_tool_chain: state.hasRunToolChain,
       showEmploymentSelector: needsEmploymentStatus
     };
   }, context, 25000); // 25 second timeout
@@ -219,6 +221,8 @@ export async function handleAgentEmploymentStatus(request: {
       current_question_index: state.currentQuestionIndex,
       conversation_id: state.conversationId,
       step: state.step,
+      year_confirmed: state.yearConfirmed,
+      has_run_tool_chain: state.hasRunToolChain,
       showEmploymentSelector: false // Employment status already selected
     };
   }, context, 25000); // 25 second timeout

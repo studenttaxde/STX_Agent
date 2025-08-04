@@ -935,12 +935,12 @@ When asking questions, consider the user's profile:
       console.log('Current state:', this.state);
       
       // GATE: If above threshold but no employment status selected, require employment status first
-      if (this.state.extractedData && !this.state.deductionFlow) {
+      if (this.state.extractedData && !this.state.deductionFlow && this.state.step !== 'confirm') {
         const { bruttolohn, gross_income, year } = this.state.extractedData;
         const actualGrossIncome = bruttolohn || gross_income || 0;
         const thresholdResult = this.checkTaxThreshold(actualGrossIncome, year);
         
-        if (thresholdResult && !thresholdResult.isBelowThreshold) {
+        if (thresholdResult && !thresholdResult.isBelowThreshold && !this.state.yearConfirmed) {
           return `I need to set up your deduction flow first. Please select your employment status below.`;
         }
       }
@@ -1129,9 +1129,7 @@ Just to confirm, is your tax year **${year}** correct? (Yes / No)`;
       
       // Handle year confirmation
       if (this.state.step === 'confirm' && !this.state.yearConfirmed) {
-        this.state.yearConfirmed = true;
-        this.state.step = 'questions';
-        return `Perfect! Now please select your employment status for ${this.state.extractedData.year} below.`;
+        return this.handleYearConfirmation(true);
       }
       
       // If we're still in the initial confirmation step
@@ -1188,16 +1186,15 @@ Would you like me to help you file for another year?`;
 
   private handleDeductionQuestionResponse(input: string): string {
     if (!this.state.deductionFlow) {
-      return "I need to set up your deduction flow first. Please select your status.";
+      return "I need to set up your deduction flow first. Please select your employment status.";
     }
 
-    const currentQuestion = this.state.deductionFlow.questions[this.state.currentQuestionIndex];
+    const currentQuestionId = this.state.deductionFlow.order[this.state.currentQuestionIndex];
+    const currentQuestion = this.state.deductionFlow.questions.find(q => q.id === currentQuestionId);
+    
     if (!currentQuestion) {
-      return this.getTaxCalculation({ 
-        includeSummary: true, 
-        includePersonalization: true, 
-        format: 'markdown' 
-      }) as string;
+      console.error('Question not found:', currentQuestionId);
+      return "I encountered an error finding the current question. Please try again.";
     }
 
     // Process the user's answer
@@ -1208,15 +1205,12 @@ Would you like me to help you file for another year?`;
     this.state.currentQuestionIndex++;
 
     // Check if we have more questions
-    if (this.state.currentQuestionIndex < this.state.deductionFlow.questions.length) {
+    if (this.state.currentQuestionIndex < this.state.deductionFlow.order.length) {
       return this.askNextDeductionQuestion();
     } else {
-      // All questions answered, generate summary using unified method
-      return this.getTaxCalculation({ 
-        includeSummary: true, 
-        includePersonalization: true, 
-        format: 'markdown' 
-      }) as string;
+      // All questions answered, proceed to calculation
+      this.state.step = 'calculate';
+      return "Great! I have all the information I need. Let me calculate your tax refund...";
     }
   }
 
@@ -1654,6 +1648,20 @@ Let's start with the deduction questions:
 ${this.askNextDeductionQuestion()}`;
   }
 
+  /**
+   * Handle year confirmation
+   */
+  handleYearConfirmation(confirmed: boolean): string {
+    if (confirmed) {
+      this.state.yearConfirmed = true;
+      this.state.step = 'questions';
+      return `Perfect! Now please select your employment status for ${this.state.extractedData?.year} below.`;
+    } else {
+      // If year is not correct, ask user to provide correct year
+      return `Please provide the correct tax year for your filing.`;
+    }
+  }
+
   isComplete(): boolean {
     return this.state.isComplete;
   }
@@ -1919,7 +1927,8 @@ Respond in a conversational, helpful manner. Don't just ask the next question - 
       const amountMatch = input.match(/(\d+(?:[.,]\d+)?)/);
       if (amountMatch) {
         const amount = parseFloat(amountMatch[1].replace(',', '.'));
-        const currentQuestion = this.state.deductionFlow?.questions[this.state.currentQuestionIndex];
+        const currentQuestionId = this.state.deductionFlow?.order[this.state.currentQuestionIndex];
+        const currentQuestion = this.state.deductionFlow?.questions.find(q => q.id === currentQuestionId);
         if (currentQuestion) {
           this.state.deductionAnswers[currentQuestion.id] = {
             questionId: currentQuestion.id,
@@ -1929,7 +1938,8 @@ Respond in a conversational, helpful manner. Don't just ask the next question - 
           };
         }
       } else if (input.toLowerCase().includes('no')) {
-        const currentQuestion = this.state.deductionFlow?.questions[this.state.currentQuestionIndex];
+        const currentQuestionId = this.state.deductionFlow?.order[this.state.currentQuestionIndex];
+        const currentQuestion = this.state.deductionFlow?.questions.find(q => q.id === currentQuestionId);
         if (currentQuestion) {
           this.state.deductionAnswers[currentQuestion.id] = {
             questionId: currentQuestion.id,
@@ -1945,8 +1955,9 @@ Respond in a conversational, helpful manner. Don't just ask the next question - 
         this.state.currentQuestionIndex++;
         
         // Check if we have more questions
-        if (this.state.currentQuestionIndex < (this.state.deductionFlow?.questions.length || 0)) {
-          const nextQuestion = this.state.deductionFlow?.questions[this.state.currentQuestionIndex];
+        if (this.state.currentQuestionIndex < (this.state.deductionFlow?.order.length || 0)) {
+          const nextQuestionId = this.state.deductionFlow?.order[this.state.currentQuestionIndex];
+          const nextQuestion = this.state.deductionFlow?.questions.find(q => q.id === nextQuestionId);
           return `${response}
 
 **Next Question:**
@@ -1954,16 +1965,11 @@ ${nextQuestion?.question}
 
 Please answer with the amount in euros, or "no" if you don't have this expense.`;
         } else {
-          // All questions answered, generate summary using unified method
-          const summary = this.getTaxCalculation({ 
-            includeSummary: true, 
-            includePersonalization: true, 
-            format: 'markdown' 
-          }) as string;
-          
+          // All questions answered, proceed to calculation
+          this.state.step = 'calculate';
           return `${response}
 
-${summary}`;
+Great! I have all the information I need. Let me calculate your tax refund...`;
         }
       }
 

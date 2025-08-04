@@ -395,7 +395,8 @@ function AdvisorChat() {
           done: data.done || false,
           deductionFlow: data.deductionFlow || prev.deductionFlow,
           currentQuestionIndex: data.currentQuestionIndex || prev.currentQuestionIndex,
-          taxCalculation: data.taxCalculation || prev.taxCalculation
+          taxCalculation: data.taxCalculation || prev.taxCalculation,
+          step: data.step || prev.step
         }))
 
         // Check if employment status selector should be shown
@@ -483,7 +484,8 @@ function AdvisorChat() {
           done: data.done || false,
           deductionFlow: data.deductionFlow || prev.deductionFlow,
           currentQuestionIndex: data.currentQuestionIndex || prev.currentQuestionIndex,
-          taxCalculation: data.taxCalculation || prev.taxCalculation
+          taxCalculation: data.taxCalculation || prev.taxCalculation,
+          step: data.step || prev.step
         }))
       } else {
         const errorData = await response.json().catch(() => ({}))
