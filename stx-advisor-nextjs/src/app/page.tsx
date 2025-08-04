@@ -3,14 +3,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { config } from '@/utils/config'
 import { TaxAdvisorState, UserData, MultiPDFData } from '@/types'
-import { 
-  getSuggestedDeductions, 
-  getUserProfile, 
-  saveTaxFiling, 
-  getTaxFilings, 
-  getTaxFilingByYear, 
-  hasExistingData 
-} from '@/services/supabaseService'
 
 // TODO: UNUSED - safe to delete after verification
 // These components exist but are not used in the main flow:
@@ -75,9 +67,10 @@ function AdvisorChat() {
 
   const loadExistingData = async (id: string) => {
     try {
-      const filings = await getTaxFilings(id)
-      if (filings.length > 0) {
-        setExistingData(filings)
+      const response = await fetch(`/api/tax-filing/get-tax-filings?userId=${id}`)
+      const result = await response.json()
+      if (result.success && result.data.length > 0) {
+        setExistingData(result.data)
       }
     } catch (error) {
       console.error('Error loading existing data:', error)
@@ -86,12 +79,14 @@ function AdvisorChat() {
 
   const checkExistingDataForYear = async (year: number) => {
     try {
-      const hasData = await hasExistingData(userId, year)
-      if (hasData) {
-        const existingFiling = await getTaxFilingByYear(userId, year)
-        if (existingFiling) {
+      const hasDataResponse = await fetch(`/api/tax-filing/has-existing-data?userId=${userId}&year=${year}`)
+      const hasDataResult = await hasDataResponse.json()
+      if (hasDataResult.success && hasDataResult.hasData) {
+        const existingFilingResponse = await fetch(`/api/tax-filing/get-tax-filing-by-year?userId=${userId}&year=${year}`)
+        const existingFilingResult = await existingFilingResponse.json()
+        if (existingFilingResult.success && existingFilingResult.data) {
           setShowExistingDataModal(true)
-          return existingFiling
+          return existingFilingResult.data
         }
       }
       return null
@@ -267,17 +262,20 @@ function AdvisorChat() {
       }
 
       // Load suggested deductions
-      try {
-        if (years.length > 0) {
-          const year = Math.max(...years.map((y: any) => parseInt(y)))
-          if (isFinite(year) && year > 0) {
-            const suggestions = await getSuggestedDeductions(userId, year)
-            setSuggestedDeductions(suggestions)
+              try {
+          if (years.length > 0) {
+            const year = Math.max(...years.map((y: any) => parseInt(y)))
+            if (isFinite(year) && year > 0) {
+              const suggestionsResponse = await fetch(`/api/tax-filing/get-suggested-deductions?userId=${userId}&year=${year}`)
+              const suggestionsResult = await suggestionsResponse.json()
+              if (suggestionsResult.success) {
+                setSuggestedDeductions(suggestionsResult.data)
+              }
+            }
           }
+        } catch (error) {
+          console.error('Error fetching suggested deductions:', error)
         }
-      } catch (error) {
-        console.error('Error fetching suggested deductions:', error)
-      }
 
       // Calculate year safely
       const calculatedYear = years.length > 0 ? Math.max(...years.map((y: any) => parseInt(y))) : new Date().getFullYear()
@@ -440,17 +438,25 @@ I'm ready to help you with your tax filing! What would you like to know?`
           try {
             const year = state.extractedData?.year || new Date().getFullYear()
             
-            // TODO: FIX - Should use API route instead of direct service call
-            // Currently calling service directly, should use /api/tax-filing/save-tax-filing
-            await saveTaxFiling({
-              user_id: userId,
-              year: year,
-              gross_income: state.extractedData?.bruttolohn || state.extractedData?.gross_income || 0,
-              income_tax_paid: state.extractedData?.lohnsteuer || state.extractedData?.income_tax_paid || 0,
-              employer: state.extractedData?.employer || 'Unknown',
-              full_name: 'User',
-              deductions: state.deductionAnswers
+            const saveResponse = await fetch('/api/tax-filing/save-tax-filing', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                user_id: userId,
+                year: year,
+                gross_income: state.extractedData?.bruttolohn || state.extractedData?.gross_income || 0,
+                income_tax_paid: state.extractedData?.lohnsteuer || state.extractedData?.income_tax_paid || 0,
+                employer: state.extractedData?.employer || 'Unknown',
+                full_name: 'User',
+                deductions: state.deductionAnswers
+              })
             })
+            
+            if (!saveResponse.ok) {
+              throw new Error('Failed to save tax filing')
+            }
 
             console.log('Tax filing saved successfully')
           } catch (error) {
