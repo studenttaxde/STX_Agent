@@ -45,6 +45,7 @@ export interface PflegedAgentState {
   isComplete: boolean;
   done: boolean;
   hasInteracted: boolean;
+  yearConfirmed: boolean;
   
   // Autonomous tool chaining state
   latestSummary?: string;
@@ -102,108 +103,157 @@ export class PflegedAgent {
     2024: 11604
   };
 
-  // Deduction flows mapped by user status
+  // Deduction flows mapped by user status with specific question queues
   private readonly deductionFlowMap: Record<UserStatus, DeductionFlow> = {
     bachelor: {
       status: 'bachelor',
       questions: [
         {
-          id: 'werbungskosten',
-          question: 'Do you have work-related expenses (Werbungskosten)? This includes travel to work, work clothes, home office, etc.',
+          id: 'tuition',
+          question: 'Do you have tuition fees (Studiengebühren) for your bachelor\'s degree?',
+          category: 'Sonderausgaben',
+          maxAmount: 6000,
+          required: false
+        },
+        {
+          id: 'commute',
+          question: 'Do you have commuting expenses to your university? (e.g., public transport, fuel)',
+          category: 'Werbungskosten',
+          maxAmount: 4500,
+          required: false
+        },
+        {
+          id: 'insurance',
+          question: 'Do you have health insurance costs that were not already deducted?',
+          category: 'Sonderausgaben',
+          maxAmount: 3000,
+          required: false
+        },
+        {
+          id: 'devices',
+          question: 'Did you purchase any devices for your studies? (laptop, tablet, etc.)',
           category: 'Werbungskosten',
           maxAmount: 1000,
           required: false
         },
         {
-          id: 'sozialversicherung',
-          question: 'Do you have social security contributions (Sozialversicherung) that were not already deducted from your salary?',
-          category: 'Sozialversicherung',
-          maxAmount: 5000,
+          id: 'materials',
+          question: 'Do you have study materials expenses? (books, software, etc.)',
+          category: 'Werbungskosten',
+          maxAmount: 500,
           required: false
         }
       ],
-      order: ['werbungskosten', 'sozialversicherung']
+      order: ['tuition', 'commute', 'insurance', 'devices', 'materials']
     },
     master: {
       status: 'master',
       questions: [
         {
-          id: 'werbungskosten',
-          question: 'Do you have work-related expenses (Werbungskosten)? This includes travel to work, work clothes, home office, etc.',
+          id: 'tuition',
+          question: 'Do you have tuition fees (Studiengebühren) for your master\'s degree?',
+          category: 'Sonderausgaben',
+          maxAmount: 6000,
+          required: false
+        },
+        {
+          id: 'commute',
+          question: 'Do you have commuting expenses to your university? (e.g., public transport, fuel)',
+          category: 'Werbungskosten',
+          maxAmount: 4500,
+          required: false
+        },
+        {
+          id: 'insurance',
+          question: 'Do you have health insurance costs that were not already deducted?',
+          category: 'Sonderausgaben',
+          maxAmount: 3000,
+          required: false
+        },
+        {
+          id: 'devices',
+          question: 'Did you purchase any devices for your studies? (laptop, tablet, etc.)',
           category: 'Werbungskosten',
           maxAmount: 1000,
           required: false
         },
         {
-          id: 'sozialversicherung',
-          question: 'Do you have social security contributions (Sozialversicherung) that were not already deducted from your salary?',
-          category: 'Sozialversicherung',
-          maxAmount: 5000,
+          id: 'materials',
+          question: 'Do you have study materials expenses? (books, software, etc.)',
+          category: 'Werbungskosten',
+          maxAmount: 500,
           required: false
         },
         {
-          id: 'sonderausgaben',
-          question: 'Do you have special expenses (Sonderausgaben)? This includes church tax, insurance premiums, etc.',
-          category: 'Sonderausgaben',
-          maxAmount: 3000,
+          id: 'verluste',
+          question: 'Do you want to apply for Verlustvortrag (loss carryforward) from previous years?',
+          category: 'Verlustvortrag',
+          maxAmount: 0,
           required: false
         }
       ],
-      order: ['werbungskosten', 'sozialversicherung', 'sonderausgaben']
+      order: ['tuition', 'commute', 'insurance', 'devices', 'materials', 'verluste']
     },
     gradjob: {
       status: 'gradjob',
       questions: [
         {
-          id: 'werbungskosten',
-          question: 'Do you have work-related expenses (Werbungskosten)? This includes travel to work, work clothes, home office, etc.',
+          id: 'job_start',
+          question: 'Is this your first year working after graduation?',
+          category: 'Sonderausgaben',
+          maxAmount: 0,
+          required: false
+        },
+        {
+          id: 'commute',
+          question: 'Do you have commuting expenses to your workplace? (e.g., public transport, fuel)',
+          category: 'Werbungskosten',
+          maxAmount: 4500,
+          required: false
+        },
+        {
+          id: 'expenses',
+          question: 'Do you have work-related expenses? (work clothes, home office, etc.)',
           category: 'Werbungskosten',
           maxAmount: 1000,
           required: false
-        },
-        {
-          id: 'sozialversicherung',
-          question: 'Do you have social security contributions (Sozialversicherung) that were not already deducted from your salary?',
-          category: 'Sozialversicherung',
-          maxAmount: 5000,
-          required: false
-        },
-        {
-          id: 'sonderausgaben',
-          question: 'Do you have special expenses (Sonderausgaben)? This includes church tax, insurance premiums, etc.',
-          category: 'Sonderausgaben',
-          maxAmount: 3000,
-          required: false
         }
       ],
-      order: ['werbungskosten', 'sozialversicherung', 'sonderausgaben']
+      order: ['job_start', 'commute', 'expenses']
     },
     fulltime: {
       status: 'fulltime',
       questions: [
         {
-          id: 'werbungskosten',
-          question: 'Do you have work-related expenses (Werbungskosten)? This includes travel to work, work clothes, home office, etc.',
+          id: 'commute',
+          question: 'Do you have commuting expenses to your workplace? (e.g., public transport, fuel)',
+          category: 'Werbungskosten',
+          maxAmount: 4500,
+          required: false
+        },
+        {
+          id: 'home_office',
+          question: 'Do you work from home? If yes, how many days per week?',
+          category: 'Werbungskosten',
+          maxAmount: 1250,
+          required: false
+        },
+        {
+          id: 'equipment',
+          question: 'Do you have office equipment expenses? (desk, chair, etc.)',
           category: 'Werbungskosten',
           maxAmount: 1000,
           required: false
         },
         {
-          id: 'sozialversicherung',
-          question: 'Do you have social security contributions (Sozialversicherung) that were not already deducted from your salary?',
-          category: 'Sozialversicherung',
-          maxAmount: 5000,
-          required: false
-        },
-        {
-          id: 'sonderausgaben',
-          question: 'Do you have special expenses (Sonderausgaben)? This includes church tax, insurance premiums, etc.',
-          category: 'Sonderausgaben',
-          maxAmount: 3000,
+          id: 'courses',
+          question: 'Do you have professional development courses or certifications?',
+          category: 'Werbungskosten',
+          maxAmount: 2000,
           required: false
         }
       ],
-      order: ['werbungskosten', 'sozialversicherung', 'sonderausgaben']
+      order: ['commute', 'home_office', 'equipment', 'courses']
     }
   };
 
@@ -230,6 +280,7 @@ export class PflegedAgent {
       step: 'upload',
       done: false,
       hasInteracted: false,
+      yearConfirmed: false,
       debugLog: [],
       hasRunToolChain: false
     };
@@ -261,6 +312,7 @@ export class PflegedAgent {
       step: 'upload',
       done: false,
       hasInteracted: false,
+      yearConfirmed: false,
       debugLog: [],
       hasRunToolChain: false
     };
@@ -283,6 +335,7 @@ export class PflegedAgent {
       step: 'upload',
       done: false,
       hasInteracted: false,
+      yearConfirmed: false,
       debugLog: [],
       hasRunToolChain: false
     };
@@ -687,6 +740,7 @@ export class PflegedAgent {
               step: 'upload',
               done: false,
               hasInteracted: false, // Reset hasInteracted
+              yearConfirmed: false,
               debugLog: [], // Reset debugLog
               hasRunToolChain: false // Reset hasRunToolChain
             };
@@ -921,9 +975,13 @@ When asking questions, consider the user's profile:
         return this.handleAIDeductionConversation(input);
       }
 
-      // Autonomous tool chaining logic - ONLY run after employment status is selected
-      if (this.state.extractedData && !this.state.hasRunToolChain && this.state.deductionFlow) {
-        console.log('Running autonomous tool chain after employment status selected...');
+      // Autonomous tool chaining logic - ONLY run after all prerequisites are met
+      if (this.state.extractedData && 
+          !this.state.hasRunToolChain && 
+          this.state.deductionFlow && 
+          this.state.yearConfirmed &&
+          this.state.currentQuestionIndex >= (this.state.deductionFlow.order?.length || 0)) {
+        console.log('Running autonomous tool chain after all prerequisites met...');
         
         // Check if we have enough data for comprehensive analysis
         const hasBasicData = this.state.extractedData.gross_income && 
@@ -1047,15 +1105,14 @@ Would you like me to help you file for another year?`;
       this.state.isComplete = true;
       this.state.done = true;
     } else {
-      // If above threshold, ONLY ask for employment status - NO refund calculations yet
+      // If above threshold, ask for year confirmation first
       response += `You're above the tax-free threshold (€${thresholdResult?.threshold.toLocaleString('de-DE') || 'unknown'}) for ${year}.
 
-Before we begin deductions, please select your employment status below.`;
+Just to confirm, is your tax year **${year}** correct? (Yes / No)`;
       
-      // Set step to questions to await employment status
-      this.state.step = 'questions';
-      // Ensure deductionFlow is undefined until employment status is selected
-      this.state.deductionFlow = undefined;
+      // Set step to confirm year
+      this.state.step = 'confirm';
+      this.state.yearConfirmed = false;
     }
 
     return response;
@@ -1070,8 +1127,15 @@ Before we begin deductions, please select your employment status below.`;
         return "I don't have your tax data yet. Please upload your tax documents first.";
       }
       
+      // Handle year confirmation
+      if (this.state.step === 'confirm' && !this.state.yearConfirmed) {
+        this.state.yearConfirmed = true;
+        this.state.step = 'questions';
+        return `Perfect! Now please select your employment status for ${this.state.extractedData.year} below.`;
+      }
+      
       // If we're still in the initial confirmation step
-      if (this.state.step === 'extract' || this.state.step === 'confirm') {
+      if (this.state.step === 'extract') {
         const { year, gross_income, bruttolohn, income_tax_paid, lohnsteuer } = this.state.extractedData;
         const actualGrossIncome = bruttolohn || gross_income || 0;
         const actualTaxPaid = lohnsteuer || income_tax_paid || 0;
@@ -1087,13 +1151,11 @@ Before we begin deductions, please select your employment status below.`;
 
 Would you like me to help you file for another year?`;
         } else {
-          this.state.step = 'questions';
-          this.state.deductionFlow = undefined;
-          return `You're above the tax-free threshold (€${thresholdResult?.threshold.toLocaleString('de-DE') || 'unknown'}) for ${year}.
-
-Before we begin deductions, please select your employment status below.`;
+          this.state.step = 'confirm';
+          this.state.yearConfirmed = false;
+          return `Just to confirm, is your tax year **${year}** correct? (Yes / No)`;
         }
-      } else if (this.state.step === 'questions') {
+      } else if (this.state.step === 'questions' && this.state.deductionFlow) {
         // Handle deduction question responses
         return this.handleDeductionQuestionResponse(input);
       }
@@ -1160,23 +1222,29 @@ Before we begin deductions, please select your employment status below.`;
 
   private askNextDeductionQuestion(): string {
     if (!this.state.deductionFlow) {
-      return "I need to set up your deduction flow first.";
+      return "I need to set up your deduction flow first. Please select your employment status.";
     }
 
-    const currentQuestion = this.state.deductionFlow.questions[this.state.currentQuestionIndex];
-    if (!currentQuestion) {
-      return this.getTaxCalculation({ 
-        includeSummary: true, 
-        includePersonalization: true, 
-        format: 'markdown' 
-      }) as string;
+    const { questions, order } = this.state.deductionFlow;
+    
+    if (this.state.currentQuestionIndex >= order.length) {
+      // All questions answered, proceed to calculation
+      this.state.step = 'calculate';
+      return "Great! I have all the information I need. Let me calculate your tax refund...";
     }
 
-    return `**Question ${this.state.currentQuestionIndex + 1} of ${this.state.deductionFlow.questions.length}:**
+    const questionId = order[this.state.currentQuestionIndex];
+    const question = questions.find(q => q.id === questionId);
+    
+    if (!question) {
+      console.error('Question not found:', questionId);
+      return "I encountered an error finding the next question. Please try again.";
+    }
 
-${currentQuestion.question}
-
-Please answer with the amount in euros, or "no" if you don't have this expense.`;
+    // Add transition message if not the first question
+    const transition = this.state.currentQuestionIndex > 0 ? "Got it. Let's move to the next deduction...\n\n" : "";
+    
+    return `${transition}${question.question}`;
   }
 
   private processDeductionAnswer(input: string, question: DeductionQuestion): DeductionAnswer {
@@ -1581,7 +1649,7 @@ Based on your extracted data, here's your tax summary:
 **Gross Income:** €${Number(actualGrossIncome).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
 **Tax Paid:** €${Number(actualTaxPaid).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
 
-I'm now ready to help you with your tax filing. Let's start with the deduction questions:
+Let's start with the deduction questions:
 
 ${this.askNextDeductionQuestion()}`;
   }
