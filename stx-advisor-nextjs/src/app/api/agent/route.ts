@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { AgentInitializeSchema, AgentRespondSchema } from '@/types/validation';
-import { handleAgentInitialize, handleAgentRespond, removeAgentSession } from '@/services/agentService';
+import { handleAgentInitialize, handleAgentRespond, handleAgentEmploymentStatus, removeAgentSession } from '@/services/agentService';
 import { handleAgentError } from '@/utils/errorHandler';
 
 export async function POST(request: NextRequest) {
@@ -14,9 +14,12 @@ export async function POST(request: NextRequest) {
         validatedBody = AgentInitializeSchema.parse(body);
       } else if (body.action === 'respond') {
         validatedBody = AgentRespondSchema.parse(body);
+      } else if (body.action === 'employment-status') {
+        // For employment-status, we'll validate manually since we don't have a schema yet
+        validatedBody = body;
       } else {
         return NextResponse.json(
-          { error: 'Invalid action. Must be "initialize" or "respond"' },
+          { error: 'Invalid action. Must be "initialize", "respond", or "employment-status"' },
           { status: 400 }
         );
       }
@@ -33,6 +36,8 @@ export async function POST(request: NextRequest) {
       result = await handleAgentInitialize(validatedBody);
     } else if (validatedBody.action === 'respond') {
       result = await handleAgentRespond(validatedBody);
+    } else if (validatedBody.action === 'employment-status') {
+      result = await handleAgentEmploymentStatus(validatedBody);
     }
 
     return NextResponse.json(result);

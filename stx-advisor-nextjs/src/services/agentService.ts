@@ -1,5 +1,5 @@
 import { PflegedAgent } from '@/agent/taxAdvisorAgent';
-import { ExtractedData } from '@/types';
+import { ExtractedData, UserStatus } from '@/types';
 import { 
   AgentInitializeRequest, 
   AgentRespondRequest,
@@ -156,6 +156,50 @@ export async function handleAgentRespond(request: AgentRespondRequest): Promise<
       success: true,
       message: nextMessage,
       done: isDone,
+      deduction_flow: state.deductionFlow,
+      current_question_index: state.currentQuestionIndex,
+      conversation_id: state.conversationId,
+      step: state.step
+    };
+  }, context, 25000); // 25 second timeout
+}
+
+/**
+ * Handle employment status selection
+ */
+export async function handleAgentEmploymentStatus(request: {
+  sessionId: string;
+  employmentStatus: UserStatus;
+  extractedData?: ExtractedData;
+  multiPDFData?: any;
+}): Promise<AgentResponse> {
+  const { sessionId, employmentStatus, extractedData, multiPDFData } = request;
+  
+  const context: ErrorContext = {
+    endpoint: '/api/agent/agent',
+    action: 'employment-status',
+    sessionId
+  };
+  
+  return withErrorHandling(async () => {
+    validateRequiredFields({ sessionId, employmentStatus }, ['sessionId', 'employmentStatus'], context);
+    
+    const agent = getOrCreateAgent(sessionId);
+
+    console.log('Processing employment status selection:', employmentStatus);
+    
+    // Use the agent's employment status handler
+    const response = agent.handleEmploymentStatusSelection(employmentStatus);
+    
+    console.log('Employment status response:', response);
+    
+    // Get current state
+    const state = agent.getState();
+    
+    return {
+      success: true,
+      message: response,
+      done: false,
       deduction_flow: state.deductionFlow,
       current_question_index: state.currentQuestionIndex,
       conversation_id: state.conversationId,

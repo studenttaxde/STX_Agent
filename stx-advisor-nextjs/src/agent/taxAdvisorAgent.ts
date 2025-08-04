@@ -151,8 +151,8 @@ export class PflegedAgent {
       ],
       order: ['werbungskosten', 'sozialversicherung', 'sonderausgaben']
     },
-    new_employee: {
-      status: 'new_employee',
+    gradjob: {
+      status: 'gradjob',
       questions: [
         {
           id: 'werbungskosten',
@@ -167,12 +167,19 @@ export class PflegedAgent {
           category: 'Sozialversicherung',
           maxAmount: 5000,
           required: false
+        },
+        {
+          id: 'sonderausgaben',
+          question: 'Do you have special expenses (Sonderausgaben)? This includes church tax, insurance premiums, etc.',
+          category: 'Sonderausgaben',
+          maxAmount: 3000,
+          required: false
         }
       ],
-      order: ['werbungskosten', 'sozialversicherung']
+      order: ['werbungskosten', 'sozialversicherung', 'sonderausgaben']
     },
-    full_time: {
-      status: 'full_time',
+    fulltime: {
+      status: 'fulltime',
       questions: [
         {
           id: 'werbungskosten',
@@ -1087,29 +1094,13 @@ Please select your status for the year:
     } else if (lastUserMessage.includes('no') || lastUserMessage.includes('wrong')) {
       this.state.step = 'upload';
       return "Please upload the correct PDF for the year you want to file.";
-    } else if (/^[1-4]$/.test(lastUserMessage) || ['bachelor', 'master', 'new_employee', 'full_time'].includes(lastUserMessage)) {
+    } else if (/^[1-4]$/.test(lastUserMessage) || ['bachelor', 'master', 'gradjob', 'fulltime'].includes(lastUserMessage)) {
       const status = /^[1-4]$/.test(lastUserMessage) ? 
-        ['bachelor', 'master', 'new_employee', 'full_time'][parseInt(lastUserMessage) - 1] : 
+        ['bachelor', 'master', 'gradjob', 'fulltime'][parseInt(lastUserMessage) - 1] : 
         lastUserMessage;
       
-      // Set the deduction flow based on status
-      this.state.deductionFlow = this.deductionFlowMap[status as UserStatus];
-      this.state.step = 'questions';
-      this.state.currentQuestionIndex = 0;
-      
-      const { bruttolohn, gross_income, lohnsteuer, income_tax_paid } = this.state.extractedData || {};
-      const actualGrossIncome = bruttolohn || gross_income || 0;
-      const actualTaxPaid = lohnsteuer || income_tax_paid || 0;
-      
-      return `Perfect! I've set your status as: **${status.toUpperCase()}**
-
-Based on your extracted data, here's your tax summary:
-
-**Tax Year:** ${this.state.extractedData?.year}
-**Gross Income:** €${Number(actualGrossIncome).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
-**Tax Paid:** €${Number(actualTaxPaid).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
-
-I'm now ready to help you with your tax filing. Would you like to proceed with deductions? (yes/no)`;
+      // Use the new employment status handler
+      return this.handleEmploymentStatusSelection(status as UserStatus);
     } else if (lastUserMessage.includes('proceed') || lastUserMessage.includes('deductions')) {
       if (this.state.deductionFlow) {
         this.state.step = 'questions';
@@ -1551,6 +1542,42 @@ ${explanation}
 
   addDeductionAnswer(questionId: string, answer: DeductionAnswer) {
     this.state.deductionAnswers[questionId] = answer;
+  }
+
+  /**
+   * Handle employment status selection and start deduction flow
+   */
+  handleEmploymentStatusSelection(status: UserStatus): string {
+    console.log('Employment status selected:', status);
+    
+    // Set the deduction flow based on status
+    this.state.deductionFlow = this.deductionFlowMap[status];
+    this.state.step = 'questions';
+    this.state.currentQuestionIndex = 0;
+    
+    // Get status display name
+    const statusDisplayNames = {
+      bachelor: 'Bachelor Student',
+      master: 'Master Student', 
+      gradjob: 'Employed After Graduation',
+      fulltime: 'Full-Time Employee'
+    };
+    
+    const { bruttolohn, gross_income, lohnsteuer, income_tax_paid } = this.state.extractedData || {};
+    const actualGrossIncome = bruttolohn || gross_income || 0;
+    const actualTaxPaid = lohnsteuer || income_tax_paid || 0;
+    
+    return `Perfect! I've set your status as: **${statusDisplayNames[status]}**
+
+Based on your extracted data, here's your tax summary:
+
+**Tax Year:** ${this.state.extractedData?.year}
+**Gross Income:** €${Number(actualGrossIncome).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+**Tax Paid:** €${Number(actualTaxPaid).toLocaleString('de-DE', { minimumFractionDigits: 2 })}
+
+I'm now ready to help you with your tax filing. Let's start with the deduction questions:
+
+${this.askNextDeductionQuestion()}`;
   }
 
   isComplete(): boolean {

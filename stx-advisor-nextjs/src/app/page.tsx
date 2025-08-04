@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { config } from '@/utils/config'
-import { TaxAdvisorState, UserData, MultiPDFData } from '@/types'
+import { TaxAdvisorState, UserData, MultiPDFData, UserStatus } from '@/types'
+import EmploymentStatusSelector, { EmploymentStatus } from '@/components/EmploymentStatusSelector'
 
 // TODO: UNUSED - safe to delete after verification
 // These components exist but are not used in the main flow:
@@ -48,6 +49,8 @@ function AdvisorChat() {
   const [processingStatus, setProcessingStatus] = useState<string>('')
   const [error, setError] = useState<string>('')
   const [isAgentLoading, setIsAgentLoading] = useState(false)
+  const [selectedEmploymentStatus, setSelectedEmploymentStatus] = useState<EmploymentStatus | null>(null)
+  const [showEmploymentSelector, setShowEmploymentSelector] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const chatContainerRef = useRef<HTMLDivElement>(null)
@@ -316,16 +319,27 @@ function AdvisorChat() {
           console.log('Advisor initialized successfully')
           console.log('Advisor response data:', advisorResponseData)
           
-                  // Only add the advisor's response, not a redundant success message
-        setState(prev => ({
-          ...prev,
-          messages: [
-            {
-              sender: 'assistant',
-              text: advisorResponseData.message
-            }
-          ]
-        }))
+          // Check if the agent is asking for employment status
+          const needsEmploymentStatus = advisorResponseData.message && 
+            (advisorResponseData.message.includes('employment status') || 
+             advisorResponseData.message.includes('Please select') ||
+             advisorResponseData.message.includes('bachelor') ||
+             advisorResponseData.message.includes('master'))
+          
+          if (needsEmploymentStatus) {
+            setShowEmploymentSelector(true)
+          }
+          
+          // Only add the advisor's response, not a redundant success message
+          setState(prev => ({
+            ...prev,
+            messages: [
+              {
+                sender: 'assistant',
+                text: advisorResponseData.message
+              }
+            ]
+          }))
         } else {
           console.error('Advisor initialization failed:', await advisorResponse.text())
         }
@@ -440,6 +454,58 @@ function AdvisorChat() {
     }
   }
 
+  const handleEmploymentStatusSelect = async (status: EmploymentStatus) => {
+    setSelectedEmploymentStatus(status)
+    setShowEmploymentSelector(false)
+    setIsAgentLoading(true)
+    setError('')
+
+    try {
+      const response = await fetch('/api/agent', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          action: 'employment-status',
+          sessionId: userId,
+          employmentStatus: status,
+          extractedData: state.extractedData,
+          multiPDFData: state.multiPDFData
+        })
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        
+        setState(prev => ({
+          ...prev,
+          messages: [...prev.messages, { sender: 'assistant', text: data.message }],
+          done: data.done || false,
+          deductionFlow: data.deductionFlow || prev.deductionFlow,
+          currentQuestionIndex: data.currentQuestionIndex || prev.currentQuestionIndex,
+          taxCalculation: data.taxCalculation || prev.taxCalculation
+        }))
+      } else {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.error || 'Failed to process employment status')
+      }
+    } catch (error) {
+      console.error('Error processing employment status:', error)
+      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred'
+      setError(errorMessage)
+      setState(prev => ({
+        ...prev,
+        messages: [...prev.messages, { 
+          sender: 'assistant', 
+          text: 'I apologize, but I encountered an error processing your employment status. Please try again.' 
+        }]
+      }))
+    } finally {
+      setIsAgentLoading(false)
+    }
+  }
+
   const handleFileAnotherYear = () => {
     setState(prev => ({
       ...prev,
@@ -455,6 +521,8 @@ function AdvisorChat() {
       taxCalculation: null,
       done: false
     }))
+    setSelectedEmploymentStatus(null)
+    setShowEmploymentSelector(false)
   }
 
   const handleUseExistingData = async (existingFiling: any) => {
@@ -600,6 +668,19 @@ function AdvisorChat() {
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2"></div>
                         <span className="text-sm">AI is thinking...</span>
                       </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Employment Status Selector */}
+                {showEmploymentSelector && !selectedEmploymentStatus && (
+                  <div className="flex justify-start">
+                    <div className="w-full max-w-4xl bg-white rounded-lg border border-gray-200 p-6">
+                      <EmploymentStatusSelector
+                        onStatusSelect={handleEmploymentStatusSelect}
+                        selectedStatus={selectedEmploymentStatus}
+                        disabled={isAgentLoading}
+                      />
                     </div>
                   </div>
                 )}

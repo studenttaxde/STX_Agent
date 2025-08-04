@@ -31,7 +31,7 @@ export interface GermanTaxFields {
 }
 
 // German Tax Advisor Types
-export type UserStatus = 'bachelor' | 'master' | 'new_employee' | 'full_time';
+export type UserStatus = 'bachelor' | 'master' | 'gradjob' | 'fulltime';
 
 export interface DeductionQuestion {
   id: string;
