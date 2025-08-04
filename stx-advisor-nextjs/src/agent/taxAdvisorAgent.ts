@@ -873,21 +873,23 @@ When asking questions, consider the user's profile:
       console.log('Agent runAgent called with input:', input);
       console.log('Current state:', this.state);
       
-      // Check if user is asking for explanation
-      const explanationKeywords = [
-        'explain', 'how did you get', 'why is my refund', 'calculation', 
-        'breakdown', 'show me how', 'can you explain', 'what does this mean',
-        'step by step', 'detailed explanation'
-      ];
-      
-      const isAskingForExplanation = explanationKeywords.some(keyword => 
-        input.toLowerCase().includes(keyword)
-      );
-      
-      // If asking for explanation and we have data, provide explanation
-      if (isAskingForExplanation && this.state.extractedData) {
-        console.log('User requested explanation, generating detailed breakdown...');
-        return this.generateRefundExplanation();
+      // Check if user is asking for explanation (only if input is not empty)
+      if (input && input.trim()) {
+        const explanationKeywords = [
+          'explain', 'how did you get', 'why is my refund', 'calculation', 
+          'breakdown', 'show me how', 'can you explain', 'what does this mean',
+          'step by step', 'detailed explanation'
+        ];
+        
+        const isAskingForExplanation = explanationKeywords.some(keyword => 
+          input.toLowerCase().includes(keyword)
+        );
+        
+        // If asking for explanation and we have data, provide explanation
+        if (isAskingForExplanation && this.state.extractedData) {
+          console.log('User requested explanation, generating detailed breakdown...');
+          return this.generateRefundExplanation();
+        }
       }
       
       // If this is the first interaction and we have extracted data, do initial analysis
