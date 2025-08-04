@@ -901,9 +901,9 @@ When asking questions, consider the user's profile:
         return this.handleAIDeductionConversation(input);
       }
 
-      // Autonomous tool chaining logic
-      if (this.state.extractedData && !this.state.hasRunToolChain) {
-        console.log('Running autonomous tool chain...');
+      // Autonomous tool chaining logic - ONLY run after employment status is selected
+      if (this.state.extractedData && !this.state.hasRunToolChain && this.state.deductionFlow) {
+        console.log('Running autonomous tool chain after employment status selected...');
         
         // Check if we have enough data for comprehensive analysis
         const hasBasicData = this.state.extractedData.gross_income && 
@@ -916,6 +916,7 @@ When asking questions, consider the user's profile:
           
           // If tool chain completed successfully, return the summary
           if (toolChainResult.success) {
+            this.state.hasRunToolChain = true;
             return toolChainResult.summary || "Analysis completed. How can I help you further?";
           }
         }
@@ -1020,6 +1021,10 @@ ${solidaritaetszuschlag ? `💸 **Solidarity Tax:** €${Number(solidaritaetszus
 You are eligible for a **full refund** of €${Number(actualTaxPaid).toLocaleString('de-DE', { minimumFractionDigits: 2 })}!
 
 Would you like me to help you file for another year?`;
+      
+      // Mark as complete for below-threshold cases
+      this.state.step = 'summary';
+      this.state.isComplete = true;
     } else {
       // If above threshold, ask for employment status
       response += `Since your income exceeds the tax-free threshold, let's check for deductible expenses to reduce your taxable income.
@@ -1031,6 +1036,9 @@ Please select your employment status for ${year}:
 4. **full_time** (Full-time employee)
 
 Which category applies to you?`;
+      
+      // Set step to questions to await employment status
+      this.state.step = 'questions';
     }
 
     return response;
@@ -1047,7 +1055,6 @@ Which category applies to you?`;
       
       // If we're still in the initial confirmation step
       if (this.state.step === 'extract' || this.state.step === 'confirm') {
-        this.state.step = 'questions';
         const { year, gross_income, bruttolohn, income_tax_paid, lohnsteuer } = this.state.extractedData;
         const actualGrossIncome = bruttolohn || gross_income || 0;
         const actualTaxPaid = lohnsteuer || income_tax_paid || 0;
@@ -1057,10 +1064,12 @@ Which category applies to you?`;
         
         if (thresholdResult && thresholdResult.isBelowThreshold) {
           this.state.step = 'summary';
+          this.state.isComplete = true;
           return `Perfect! Since your income (€${Number(actualGrossIncome).toLocaleString('de-DE', { minimumFractionDigits: 2 })}) is below the tax-free threshold (€${thresholdResult.threshold.toLocaleString('de-DE')}) for ${year}, you are eligible for a **full refund** of €${Number(actualTaxPaid).toLocaleString('de-DE', { minimumFractionDigits: 2 })}!
 
 Would you like me to help you file for another year?`;
         } else {
+          this.state.step = 'questions';
           return `Since your income exceeds the tax-free threshold, let's check for deductible expenses to reduce your taxable income.
 
 Please select your status for the year:

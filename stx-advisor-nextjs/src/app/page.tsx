@@ -80,9 +80,28 @@ function AdvisorChat() {
   const checkExistingDataForYear = async (year: number) => {
     try {
       const hasDataResponse = await fetch(`/api/tax-filing/has-existing-data?userId=${userId}&year=${year}`)
+      
+      // Check if response is ok and content-type is JSON
+      if (!hasDataResponse.ok) {
+        console.warn(`has-existing-data API returned ${hasDataResponse.status}`)
+        return null
+      }
+      
+      const contentType = hasDataResponse.headers.get('content-type')
+      if (!contentType || !contentType.includes('application/json')) {
+        console.warn('has-existing-data API returned non-JSON response')
+        return null
+      }
+      
       const hasDataResult = await hasDataResponse.json()
       if (hasDataResult.success && hasDataResult.hasData) {
         const existingFilingResponse = await fetch(`/api/tax-filing/get-tax-filing-by-year?userId=${userId}&year=${year}`)
+        
+        if (!existingFilingResponse.ok) {
+          console.warn(`get-tax-filing-by-year API returned ${existingFilingResponse.status}`)
+          return null
+        }
+        
         const existingFilingResult = await existingFilingResponse.json()
         if (existingFilingResult.success && existingFilingResult.data) {
           setShowExistingDataModal(true)
@@ -262,20 +281,31 @@ function AdvisorChat() {
       }
 
       // Load suggested deductions
-              try {
-          if (years.length > 0) {
-            const year = Math.max(...years.map((y: any) => parseInt(y)))
-            if (isFinite(year) && year > 0) {
-              const suggestionsResponse = await fetch(`/api/tax-filing/get-suggested-deductions?userId=${userId}&year=${year}`)
-              const suggestionsResult = await suggestionsResponse.json()
-              if (suggestionsResult.success) {
-                setSuggestedDeductions(suggestionsResult.data)
+      try {
+        if (years.length > 0) {
+          const year = Math.max(...years.map((y: any) => parseInt(y)))
+          if (isFinite(year) && year > 0) {
+            const suggestionsResponse = await fetch(`/api/tax-filing/get-suggested-deductions?userId=${userId}&year=${year}`)
+            
+            // Check if response is ok and content-type is JSON
+            if (!suggestionsResponse.ok) {
+              console.warn(`get-suggested-deductions API returned ${suggestionsResponse.status}`)
+            } else {
+              const contentType = suggestionsResponse.headers.get('content-type')
+              if (!contentType || !contentType.includes('application/json')) {
+                console.warn('get-suggested-deductions API returned non-JSON response')
+              } else {
+                const suggestionsResult = await suggestionsResponse.json()
+                if (suggestionsResult.success) {
+                  setSuggestedDeductions(suggestionsResult.data)
+                }
               }
             }
           }
-        } catch (error) {
-          console.error('Error fetching suggested deductions:', error)
         }
+      } catch (error) {
+        console.error('Error fetching suggested deductions:', error)
+      }
 
       // Calculate year safely
       const calculatedYear = years.length > 0 ? Math.max(...years.map((y: any) => parseInt(y))) : new Date().getFullYear()
