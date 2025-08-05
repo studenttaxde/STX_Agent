@@ -588,9 +588,10 @@ function AdvisorChat() {
   return (
     <div className="max-w-4xl mx-auto p-6">
       <div className="bg-white shadow rounded-lg">
-        <div className="p-6">
+        <div className="p-6" key={`step-${state.step}-messages-${state.messages.length}`}>
           <h2 className="text-2xl font-bold text-gray-900 mb-6">German Tax Advisor</h2>
           
+          {(() => { console.log('Upload step rendering:', state.step === 'upload'); return null; })()}
           {state.step === 'upload' && (
             <div className="mb-6">
               <label htmlFor="file-upload" className="block text-sm font-medium text-gray-700 mb-2">
@@ -618,6 +619,7 @@ function AdvisorChat() {
             </div>
           )}
 
+          {(() => { console.log('Rendering condition check:', { step: state.step, isAdvisor: state.step === 'advisor', isQuestions: state.step === 'questions' }); return null; })()}
           {(state.step === 'advisor' || state.step === 'questions') && (
             <div className="flex flex-col h-[calc(100vh-300px)] min-h-[500px]">
               {/* Tax Summary Card - Show only correct fields from extractedData */}
