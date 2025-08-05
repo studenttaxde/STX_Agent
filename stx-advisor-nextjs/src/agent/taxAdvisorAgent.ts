@@ -1001,6 +1001,7 @@ When asking questions, consider the user's profile:
       }
 
       // For all other cases, use the AI agent
+      console.log('Calling AI agent with input:', input);
       const result = await this.agent.invoke({
         input: input,
         state: this.state
@@ -1121,9 +1122,12 @@ Just to confirm, is your tax year **${year}** correct? (Yes / No)`;
   private handleConversationFallback(input: string): string {
     const lastUserMessage = input.toLowerCase();
     
+    console.log('handleConversationFallback called with:', { input, extractedData: this.state.extractedData, step: this.state.step });
+    
     // Track conversation step to prevent loops
     if (lastUserMessage.includes('yes') || lastUserMessage.includes('correct')) {
       if (!this.state.extractedData) {
+        console.log('No extracted data found, returning fallback message');
         return "I don't have your tax data yet. Please upload your tax documents first.";
       }
       
