@@ -618,7 +618,7 @@ function AdvisorChat() {
             </div>
           )}
 
-          {state.step === 'advisor' && (
+          {(state.step === 'advisor' || state.step === 'questions') && (
             <div className="flex flex-col h-[calc(100vh-300px)] min-h-[500px]">
               {/* Tax Summary Card - Show only correct fields from extractedData */}
               {state.extractedData && (

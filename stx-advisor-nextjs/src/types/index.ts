@@ -213,7 +213,7 @@ export interface FiledSummary {
 export interface TaxAdvisorState {
   messages: Message[];
   loading: boolean;
-  step: 'upload' | 'advisor' | 'done';
+  step: 'upload' | 'advisor' | 'questions' | 'done';
   extractedData: ExtractedData | null;
   multiPDFData: MultiPDFData | null;
   filedSummaries: FiledSummary[];
