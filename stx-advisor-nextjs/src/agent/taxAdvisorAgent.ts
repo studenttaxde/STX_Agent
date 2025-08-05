@@ -1165,6 +1165,12 @@ Would you like me to help you file for another year?`;
       this.state.step = 'upload';
       return "Please upload the correct PDF for the year you want to file.";
     } else if (/^[1-4]$/.test(lastUserMessage) || ['bachelor', 'master', 'gradjob', 'fulltime'].includes(lastUserMessage)) {
+      // Check if employment status is already set
+      if (this.state.deductionFlow) {
+        console.log('Employment status already set, continuing with deduction questions');
+        return this.handleDeductionQuestionResponse(input);
+      }
+      
       const status = /^[1-4]$/.test(lastUserMessage) ? 
         ['bachelor', 'master', 'gradjob', 'fulltime'][parseInt(lastUserMessage) - 1] : 
         lastUserMessage;
